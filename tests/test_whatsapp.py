@@ -146,3 +146,67 @@ def test_split_message_respects_paragraphs():
 
 def test_split_message_short_text_single_chunk():
     assert whatsapp_app.split_message("oi") == ["oi"]
+
+
+def test_twilio_webhook_triggers_handler(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        whatsapp_app,
+        "handle_question",
+        lambda phone, text, sender=None, chunk_limit=0: calls.append((phone, text)),
+    )
+    resp = client.post(
+        "/twilio-webhook",
+        data={
+            "From": "whatsapp:+5511999999999",
+            "Body": "quais fintechs vimos?",
+            "MessageSid": "SM123",
+        },
+    )
+    assert resp.status_code == 200
+    assert "<Response>" in resp.text
+    assert calls == [("5511999999999", "quais fintechs vimos?")]
+
+
+def test_twilio_webhook_ignores_non_allowed(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        whatsapp_app,
+        "handle_question",
+        lambda phone, text, sender=None, chunk_limit=0: calls.append(phone),
+    )
+    resp = client.post(
+        "/twilio-webhook",
+        data={"From": "whatsapp:+5511777777777", "Body": "oi", "MessageSid": "SM124"},
+    )
+    assert resp.status_code == 200
+    assert calls == []
+
+
+def test_twilio_webhook_dedups_message_sid(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        whatsapp_app,
+        "handle_question",
+        lambda phone, text, sender=None, chunk_limit=0: calls.append(text),
+    )
+    payload = {"From": "whatsapp:+5511999999999", "Body": "oi", "MessageSid": "SM125"}
+    client.post("/twilio-webhook", data=payload)
+    client.post("/twilio-webhook", data=payload)
+    assert len(calls) == 1
+
+
+def test_send_twilio_message_posts_to_api(monkeypatch):
+    import responses as responses_lib
+
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC123")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "tok")
+    with responses_lib.RequestsMock() as rsps:
+        rsps.post(
+            f"{whatsapp_app.TWILIO_API}/Accounts/AC123/Messages.json",
+            json={"sid": "SM1"},
+        )
+        whatsapp_app.send_twilio_message("5511999999999", "ola")
+        body = rsps.calls[0].request.body
+    assert "whatsapp%3A%2B5511999999999" in body
+    assert "ola" in body

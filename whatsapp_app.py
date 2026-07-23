@@ -152,10 +152,24 @@ def _already_processed(message_id: str) -> bool:
     return False
 
 
-def handle_question(phone: str, question: str) -> None:
-    """Run the agent loop for one incoming message and send the answer."""
+def handle_question(
+    phone: str,
+    question: str,
+    sender=None,
+    chunk_limit: int = WHATSAPP_MAX_CHARS,
+) -> None:
+    """Run the agent loop for one incoming message and send the answer.
+
+    Args:
+        phone: Sender phone (digits, no 'whatsapp:' prefix).
+        question: The user's message text.
+        sender: Callable (to, text) used to deliver messages; defaults to
+            the Meta Cloud API sender. The Twilio endpoint passes its own.
+        chunk_limit: Max characters per outgoing message for this channel.
+    """
     global _anthropic_client
-    send_whatsapp_message(phone, ACK_TEXT)
+    send = sender or send_whatsapp_message
+    send(phone, ACK_TEXT)
     try:
         if _anthropic_client is None:
             _anthropic_client = anthropic.Anthropic()
@@ -169,8 +183,8 @@ def handle_question(phone: str, question: str) -> None:
             "Desculpe, ocorreu um erro ao processar sua pergunta. "
             "Tente novamente em instantes."
         )
-    for chunk in split_message(markdown_to_whatsapp(answer)):
-        send_whatsapp_message(phone, chunk)
+    for chunk in split_message(markdown_to_whatsapp(answer), limit=chunk_limit):
+        send(phone, chunk)
 
 
 def _valid_signature(body: bytes, signature_header: str) -> bool:
@@ -233,3 +247,66 @@ async def receive_webhook(request: Request, background: BackgroundTasks):
 
     # Always 200 so Meta does not retry endlessly.
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Twilio WhatsApp (sandbox or production sender)
+# ---------------------------------------------------------------------------
+
+TWILIO_API = "https://api.twilio.com/2010-04-01"
+TWILIO_MAX_CHARS = 1_500  # Twilio WhatsApp limit is 1600; leave margin
+
+
+def _twilio_config() -> tuple:
+    sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
+    token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+    from_number = os.environ.get("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+    return sid, token, from_number
+
+
+def send_twilio_message(to: str, text: str) -> None:
+    """Send one WhatsApp message via Twilio. Logs errors, never raises."""
+    sid, token, from_number = _twilio_config()
+    try:
+        resp = requests.post(
+            f"{TWILIO_API}/Accounts/{sid}/Messages.json",
+            auth=(sid, token),
+            data={
+                "From": from_number,
+                "To": f"whatsapp:+{re.sub(r'[^0-9]', '', to)}",
+                "Body": text,
+            },
+            timeout=30,
+        )
+        if resp.status_code >= 400:
+            print(f"[twilio] send failed {resp.status_code}: {resp.text[:300]}")
+    except Exception as e:
+        print(f"[twilio] send error: {e}")
+
+
+@app.post("/twilio-webhook")
+async def receive_twilio_webhook(request: Request, background: BackgroundTasks):
+    """Receive an incoming WhatsApp message from Twilio (form-encoded)."""
+    form = await request.form()
+    from_raw = str(form.get("From", ""))  # e.g. 'whatsapp:+5511999999999'
+    body = str(form.get("Body", "")).strip()
+    message_sid = str(form.get("MessageSid", ""))
+    phone = re.sub(r"\D", "", from_raw)
+
+    if not body or not phone:
+        return Response(content="<Response></Response>", media_type="text/xml")
+    if message_sid and _already_processed(message_sid):
+        return Response(content="<Response></Response>", media_type="text/xml")
+    if not is_allowed(phone):
+        print(f"[twilio] ignored message from non-allowed {phone}")
+        return Response(content="<Response></Response>", media_type="text/xml")
+
+    background.add_task(
+        handle_question,
+        phone,
+        body,
+        send_twilio_message,
+        TWILIO_MAX_CHARS,
+    )
+    # Empty TwiML: we reply asynchronously via the REST API.
+    return Response(content="<Response></Response>", media_type="text/xml")

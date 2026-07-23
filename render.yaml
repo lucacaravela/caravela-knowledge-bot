@@ -24,6 +24,12 @@ services:
         sync: false
       - key: ALLOWED_PHONES
         sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
   - type: web
     name: caravela-knowledge-bot
     runtime: python

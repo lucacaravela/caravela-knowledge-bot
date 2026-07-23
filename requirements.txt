@@ -2,6 +2,7 @@ streamlit>=1.44,<2
 anthropic>=0.49,<1
 fastapi>=0.110,<1
 uvicorn>=0.30,<1
+python-multipart>=0.0.9,<1
 python-dotenv>=1,<2
 requests>=2,<3
 google-auth>=2,<3
