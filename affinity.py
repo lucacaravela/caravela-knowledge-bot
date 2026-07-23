@@ -38,6 +38,7 @@ SETOR_FIELD_ID = "field-394528"
 STATUS_FIELD_ID = "field-278853"
 OWNERS_FIELD_ID = "field-278854"
 MOTIVO_LOST_FIELD_ID = "field-316106"
+PORTFOLIO_LIST_ID = int(os.environ.get("AFFINITY_PORTFOLIO_LIST_ID", "73539"))
 
 # Caps so tool output does not explode the model context.
 MAX_SEARCH_RESULTS = 20
@@ -282,6 +283,109 @@ def search_pipeline(
         return f"Affinity API error while browsing the Pipeline list: {e}"
     except Exception as e:
         return f"Error browsing the Affinity Pipeline list: {e}"
+
+
+def list_portfolio() -> str:
+    """List every company on the 'Investidas' (portfolio) list.
+
+    Returns:
+        A formatted string with each portfolio company's name, org id,
+        domain, date added and any filled-in list fields (e.g. Status),
+        or a readable error message.
+    """
+    try:
+        lines = []
+        url: Optional[str] = None
+        count = 0
+        while True:
+            if url:
+                data = _v2_get_url(url)
+            else:
+                data = _v2_get(
+                    f"/lists/{PORTFOLIO_LIST_ID}/list-entries",
+                    params={"limit": PIPELINE_PAGE_SIZE},
+                )
+            for entry in data.get("data") or []:
+                entity = entry.get("entity") or {}
+                fields = _field_map(entity.get("fields"))
+                extras = "; ".join(
+                    f"{k}: {v[:80]}" for k, v in fields.items()
+                    if k.lower() in ("status", "setor", "sector", "owners")
+                )
+                domain = entity.get("domain") or "-"
+                added = (entry.get("createdAt") or "")[:10]
+                suffix = f" — {extras}" if extras else ""
+                lines.append(
+                    f"- {entity.get('name', '(no name)')} (id: {entity.get('id')}, "
+                    f"domain: {domain}, added: {added}){suffix}"
+                )
+                count += 1
+            url = (data.get("pagination") or {}).get("nextUrl")
+            if not url or count > 300:
+                break
+        if not lines:
+            return "The Investidas (portfolio) list is empty or unavailable."
+        return f"{count} portfolio companies (Investidas list):\n" + "\n".join(lines)
+    except requests.HTTPError as e:
+        return f"Affinity API error listing the portfolio: {e}"
+    except Exception as e:
+        return f"Error listing the Affinity portfolio: {e}"
+
+
+def search_persons(query: str) -> str:
+    """Search people in Affinity by name, with their organizations.
+
+    Args:
+        query: Person name (or part of it) to search for.
+
+    Returns:
+        A formatted string with up to 10 matches (name, email, associated
+        organizations), or a readable error message.
+    """
+    try:
+        data = _v1_get("/persons", params={"term": query, "page_size": 10})
+        persons = data.get("persons") or []
+        if not persons:
+            return f"No people found in Affinity for '{query}'."
+
+        org_name_cache: dict = {}
+
+        def org_name(org_id: Any) -> str:
+            if org_id not in org_name_cache:
+                try:
+                    org = _v1_get(f"/organizations/{org_id}")
+                    org_name_cache[org_id] = org.get("name") or f"org {org_id}"
+                except Exception:
+                    org_name_cache[org_id] = f"org {org_id}"
+            return org_name_cache[org_id]
+
+        lines = [f"Found {len(persons)} people for '{query}':"]
+        for i, p in enumerate(persons[:10]):
+            name = " ".join(
+                x for x in (p.get("first_name"), p.get("last_name")) if x
+            ) or "(no name)"
+            email = p.get("primary_email") or ", ".join(p.get("emails") or []) or "-"
+            org_ids = p.get("organization_ids")
+            if org_ids is None and i < 5:
+                # Search results omit organizations; fetch the person detail
+                # for the top matches only.
+                try:
+                    org_ids = _v1_get(f"/persons/{p.get('id')}").get(
+                        "organization_ids"
+                    )
+                except Exception:
+                    org_ids = None
+            org_ids = (org_ids or [])[:5]
+            orgs = ", ".join(org_name(oid) for oid in org_ids) or "-"
+            lines.append(
+                f"- {name} (person id: {p.get('id')}, email: {email}) — "
+                f"organizations: {orgs}"
+            )
+        return "\n".join(lines)
+    except requests.HTTPError as e:
+        return f"Affinity API error while searching people for '{query}': {e}"
+    except Exception as e:
+        return f"Error searching Affinity people for '{query}': {e}"
 
 
 def _org_list_entries(org_id: Any) -> list:

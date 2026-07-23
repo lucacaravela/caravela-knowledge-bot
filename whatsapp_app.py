@@ -178,7 +178,11 @@ def handle_question(
         answer = agent.answer_question(_anthropic_client, history)
         _trim_history(history)
     except Exception as e:
-        print(f"[whatsapp] agent error for {phone}: {e}")
+        cause = getattr(e, "__cause__", None)
+        print(
+            f"[whatsapp] agent error for {phone}: {type(e).__name__}: {e!r}"
+            + (f" (cause: {cause!r})" if cause else "")
+        )
         answer = (
             "Desculpe, ocorreu um erro ao processar sua pergunta. "
             "Tente novamente em instantes."

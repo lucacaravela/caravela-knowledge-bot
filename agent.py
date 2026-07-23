@@ -48,7 +48,9 @@ only when looking up companies by name.
 - Dealflow context: the Pipeline list is the fund's dealflow. Its Status \
 values run from 'Linkedin'/'New Lead'/'Pré-pipe' (early) through 'Analise \
 Preliminar'/'Deep Dive'/'Termsheet' (active work) to 'Won'/'Pass'/'Lost'. \
-The 'Investidas' list holds portfolio companies.
+The 'Investidas' list holds portfolio companies — use list_portfolio for \
+questions about companies the fund invested in, and search_persons for \
+people/founder lookups.
 - Pass/lost reasons live in CRM COLUMNS, not in notes: 'Motivo lost' \
 (short categories, already shown by search_pipeline) and 'Motivo Pass \
 Detalhado' (the full pass rationale/email, returned by get_org_details). \
@@ -117,6 +119,36 @@ TOOLS = [
                 },
             },
             "required": [],
+        },
+    },
+    {
+        "name": "list_portfolio",
+        "description": (
+            "List every company on the 'Investidas' list — Caravela's "
+            "portfolio (companies the fund invested in). Use for questions "
+            "about portfolio companies. No parameters."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "search_persons",
+        "description": (
+            "Search PEOPLE in Affinity by name (founders, executives, "
+            "contacts). Returns name, email and the organizations each "
+            "person is linked to. Use for questions like 'quem conhecemos "
+            "na empresa X' or looking up a founder by name. For a company's "
+            "people, also check get_org_details (People / Source of "
+            "Introduction fields)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Person name or part of it.",
+                }
+            },
+            "required": ["query"],
         },
     },
     {
@@ -224,6 +256,8 @@ TOOLS = [
 
 _TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
     "search_pipeline": affinity.search_pipeline,
+    "list_portfolio": affinity.list_portfolio,
+    "search_persons": affinity.search_persons,
     "search_orgs": affinity.search_orgs,
     "get_org_details": affinity.get_org_details,
     "get_notes": affinity.get_notes,

@@ -224,6 +224,74 @@ def test_search_orgs_http_error_returns_string():
 
 
 # ---------------------------------------------------------------------------
+# list_portfolio / search_persons
+# ---------------------------------------------------------------------------
+
+@responses.activate
+def test_list_portfolio_returns_companies():
+    responses.get(
+        f"{V2}/lists/{affinity.PORTFOLIO_LIST_ID}/list-entries",
+        json={
+            "data": [
+                {
+                    "createdAt": "2021-03-01T00:00:00Z",
+                    "entity": {
+                        "id": 5,
+                        "name": "Mottu",
+                        "domain": "mottu.com.br",
+                        "fields": [
+                            {"name": "Status", "value": {"data": {"text": "Won"}}}
+                        ],
+                    },
+                }
+            ],
+            "pagination": {"nextUrl": None},
+        },
+    )
+    result = affinity.list_portfolio()
+    assert "Mottu" in result
+    assert "Status: Won" in result
+    assert "1 portfolio companies" in result
+
+
+@responses.activate
+def test_list_portfolio_error_returns_string():
+    responses.get(f"{V2}/lists/{affinity.PORTFOLIO_LIST_ID}/list-entries", status=500)
+    result = affinity.list_portfolio()
+    assert "error" in result.lower()
+
+
+@responses.activate
+def test_search_persons_with_organizations():
+    responses.get(
+        f"{V1}/persons",
+        json={
+            "persons": [
+                {
+                    "id": 9,
+                    "first_name": "Fermin",
+                    "last_name": "Eguren",
+                    "primary_email": "fermin@anngel.mx",
+                    "organization_ids": [308645425],
+                }
+            ]
+        },
+    )
+    responses.get(f"{V1}/organizations/308645425", json={"id": 308645425, "name": "Anngel"})
+    result = affinity.search_persons("Fermin")
+    assert "Fermin Eguren" in result
+    assert "fermin@anngel.mx" in result
+    assert "Anngel" in result
+
+
+@responses.activate
+def test_search_persons_no_results():
+    responses.get(f"{V1}/persons", json={"persons": []})
+    result = affinity.search_persons("Zezinho")
+    assert "No people found" in result
+
+
+# ---------------------------------------------------------------------------
 # get_org_details
 # ---------------------------------------------------------------------------
 
