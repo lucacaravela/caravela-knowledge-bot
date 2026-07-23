@@ -37,6 +37,7 @@ PIPELINE_LIST_ID = int(os.environ.get("AFFINITY_PIPELINE_LIST_ID", "31953"))
 SETOR_FIELD_ID = "field-394528"
 STATUS_FIELD_ID = "field-278853"
 OWNERS_FIELD_ID = "field-278854"
+MOTIVO_LOST_FIELD_ID = "field-316106"
 
 # Caps so tool output does not explode the model context.
 MAX_SEARCH_RESULTS = 20
@@ -159,6 +160,7 @@ def _simplify_pipeline_entry(entry: dict) -> dict:
         "sector": fields.get("Setor", ""),
         "status": fields.get("Status", ""),
         "owners": fields.get("Owners", ""),
+        "motivo_lost": fields.get("Motivo lost", ""),
         "added": (entry.get("createdAt") or "")[:10],
     }
 
@@ -189,7 +191,12 @@ def _iter_pipeline_entries() -> Iterator[dict]:
                 f"/lists/{PIPELINE_LIST_ID}/list-entries",
                 params={
                     "limit": PIPELINE_PAGE_SIZE,
-                    "fieldIds": [SETOR_FIELD_ID, STATUS_FIELD_ID, OWNERS_FIELD_ID],
+                    "fieldIds": [
+                        SETOR_FIELD_ID,
+                        STATUS_FIELD_ID,
+                        OWNERS_FIELD_ID,
+                        MOTIVO_LOST_FIELD_ID,
+                    ],
                 },
             )
         page = data.get("data") or []
@@ -262,6 +269,7 @@ def search_pipeline(
                     ("setor", m["sector"]),
                     ("status", m["status"]),
                     ("owners", m["owners"]),
+                    ("motivo lost", m.get("motivo_lost", "")),
                     ("added", m["added"]),
                 )
                 if v

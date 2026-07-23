@@ -18,7 +18,7 @@ def clear_pipeline_cache():
     affinity._reset_pipeline_cache()
 
 
-def _entry(org_id, name, sector="", status="", created="2026-01-10T00:00:00Z"):
+def _entry(org_id, name, sector="", status="", motivo="", created="2026-01-10T00:00:00Z"):
     fields = []
     if sector:
         fields.append(
@@ -27,6 +27,10 @@ def _entry(org_id, name, sector="", status="", created="2026-01-10T00:00:00Z"):
     if status:
         fields.append(
             {"id": "field-278853", "name": "Status", "value": {"type": "ranked-dropdown", "data": {"text": status}}}
+        )
+    if motivo:
+        fields.append(
+            {"id": "field-316106", "name": "Motivo lost", "value": {"type": "dropdown-multi", "data": [{"text": motivo}]}}
         )
     return {
         "id": org_id * 10,
@@ -70,6 +74,21 @@ def test_search_pipeline_filters_by_sector_accent_insensitive():
     assert "MedCo" in result
     assert "FinCo" not in result
     assert "entire Pipeline list" in result
+
+
+@responses.activate
+def test_search_pipeline_includes_motivo_lost():
+    responses.get(
+        f"{V2}/lists/{PIPELINE}/list-entries",
+        json={
+            "data": [
+                _entry(1, "MedCo", sector="Saúde", status="Pass", motivo="Tamanho de Mercado"),
+            ],
+            "pagination": {"nextUrl": None},
+        },
+    )
+    result = affinity.search_pipeline(sector="saude", status="pass")
+    assert "motivo lost: Tamanho de Mercado" in result
 
 
 @responses.activate

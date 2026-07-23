@@ -49,6 +49,19 @@ only when looking up companies by name.
 values run from 'Linkedin'/'New Lead'/'Pré-pipe' (early) through 'Analise \
 Preliminar'/'Deep Dive'/'Termsheet' (active work) to 'Won'/'Pass'/'Lost'. \
 The 'Investidas' list holds portfolio companies.
+- Pass/lost reasons live in CRM COLUMNS, not in notes: 'Motivo lost' \
+(short categories, already shown by search_pipeline) and 'Motivo Pass \
+Detalhado' (the full pass rationale/email, returned by get_org_details). \
+When asked why a company was passed, call get_org_details BEFORE answering; \
+never claim a reason is not recorded based on notes alone.
+- Be thorough in one pass: when a question needs details or notes for \
+several companies, request ALL of them in a single turn (emit multiple tool \
+calls together) instead of one per turn. Gather everything you need before \
+answering so the user does not have to prompt you again for data you could \
+have fetched.
+- When a specific field/column the user asked about is empty, say exactly \
+that ("a coluna X está vazia para essa empresa") instead of a vague \
+'not found'.
 - If a Drive search returns nothing, retry with 2 or 3 alternative phrasings \
 before concluding there are no documents — try both Portuguese and English \
 terms (e.g. "saúde" and "healthcare", "memo" and "tese").
@@ -133,8 +146,13 @@ TOOLS = [
     {
         "name": "get_org_details",
         "description": (
-            "Get the full field data for one Affinity organization, including "
-            "which Affinity lists it appears on and its status in each list."
+            "Get EVERY filled-in column for one Affinity organization "
+            "(including 'Motivo lost', 'Motivo Pass Detalhado', Descrição, "
+            "Blurb, País, Valor do Round, Source of Introduction, enriched "
+            "data) plus every list it is on with per-list status. Required "
+            "before answering why a company was passed or any question about "
+            "its attributes. Call it for several companies in one turn when "
+            "the question covers multiple companies."
         ),
         "input_schema": {
             "type": "object",
