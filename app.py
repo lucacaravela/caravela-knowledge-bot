@@ -75,6 +75,11 @@ def require_login() -> str:
 # Chat state
 # ---------------------------------------------------------------------------
 
+def escape_dollars(text: str) -> str:
+    """Stop Streamlit from rendering $...$ as LaTeX (e.g. 'R$800' amounts)."""
+    return text.replace("$", "\\$")
+
+
 def init_state() -> None:
     if "api_messages" not in st.session_state:
         # Full Messages-API history (incl. tool_use / tool_result blocks).
@@ -135,7 +140,7 @@ def run_turn(client: anthropic.Anthropic, question: str) -> None:
                     client, st.session_state.api_messages, on_tool=on_tool
                 )
                 status.update(label="Pronto ✅", state="complete", expanded=False)
-            st.markdown(answer)
+            st.markdown(escape_dollars(answer))
             st.session_state.display_messages.append(("assistant", answer))
         except anthropic.AuthenticationError:
             st.error("Chave da API da Anthropic inválida. Verifique ANTHROPIC_API_KEY.")
@@ -168,7 +173,7 @@ def main() -> None:
 
     for role, text in st.session_state.display_messages:
         with st.chat_message(role):
-            st.markdown(text)
+            st.markdown(escape_dollars(text))
 
     pending = st.session_state.pending_question
     if pending:
