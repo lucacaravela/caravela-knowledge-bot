@@ -45,6 +45,12 @@ search_pipeline with the Portuguese Setor value (e.g. healthcare -> 'Saúde', \
 education -> 'Educação'), then pull notes for the most relevant companies, \
 then search Drive for related memos, and only then answer. Use search_orgs \
 only when looking up companies by name.
+- For SUB-sector questions ("crossborder fintechs", "telemedicina"): use \
+search_pipeline's keyword parameter over the description columns, calling \
+it several times with synonym variants in Portuguese and English (e.g. \
+'crossborder', 'cross-border', 'fx', 'cambio', 'remessa', 'pagamento \
+internacional') and merging the results. Results come with a short \
+description per company — use it for the one-line briefs.
 - Dealflow context: the Pipeline list is the fund's dealflow. Its Status \
 values run from 'Linkedin'/'New Lead'/'Pré-pipe' (early) through 'Analise \
 Preliminar'/'Deep Dive'/'Termsheet' (active work) to 'Won'/'Pass'/'Lost'. \
@@ -112,6 +118,17 @@ TOOLS = [
                 "status": {
                     "type": "string",
                     "description": "Optional Status filter (e.g. 'Deep Dive', 'Termsheet', 'Won').",
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": (
+                        "Optional free-text filter matched against company "
+                        "names AND description columns. Use for sub-sector "
+                        "questions (e.g. 'crossborder', 'fx', 'cambio', "
+                        "'consignado', 'telemedicina'). Try Portuguese and "
+                        "English variants in separate calls — repeated calls "
+                        "are cheap (results are cached)."
+                    ),
                 },
                 "limit": {
                     "type": "integer",

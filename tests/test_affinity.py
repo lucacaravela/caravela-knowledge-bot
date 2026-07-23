@@ -92,6 +92,23 @@ def test_search_pipeline_includes_motivo_lost():
 
 
 @responses.activate
+def test_search_pipeline_keyword_matches_description():
+    entry = _entry(1, "PayCo", sector="Fintech", status="Pass")
+    entry["entity"]["fields"].append(
+        {"id": "field-446059", "name": "Descrição", "value": {"type": "text", "data": "Crossborder FX payments for SMBs"}}
+    )
+    other = _entry(2, "LendCo", sector="Fintech", status="Pass")
+    responses.get(
+        f"{V2}/lists/{PIPELINE}/list-entries",
+        json={"data": [entry, other], "pagination": {"nextUrl": None}},
+    )
+    result = affinity.search_pipeline(sector="fintech", keyword="crossborder")
+    assert "PayCo" in result
+    assert "desc: Crossborder FX payments" in result
+    assert "LendCo" not in result
+
+
+@responses.activate
 def test_search_pipeline_filters_by_status():
     responses.get(
         f"{V2}/lists/{PIPELINE}/list-entries",

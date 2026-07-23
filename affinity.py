@@ -38,6 +38,9 @@ SETOR_FIELD_ID = "field-394528"
 STATUS_FIELD_ID = "field-278853"
 OWNERS_FIELD_ID = "field-278854"
 MOTIVO_LOST_FIELD_ID = "field-316106"
+DESCRICAO_FIELD_ID = "field-446059"
+BLURB_FIELD_ID = "field-3206378"
+ENRICHED_DESCRIPTION_FIELD_ID = "affinity-data-description"
 PORTFOLIO_LIST_ID = int(os.environ.get("AFFINITY_PORTFOLIO_LIST_ID", "73539"))
 
 # Caps so tool output does not explode the model context.
@@ -152,7 +155,17 @@ def _field_map(fields: Any) -> dict:
 def _simplify_pipeline_entry(entry: dict) -> dict:
     entity = entry.get("entity") or {}
     fields = _field_map(entity.get("fields"))
+    description = " | ".join(
+        v
+        for v in (
+            fields.get("Descrição", ""),
+            fields.get("Blurb", ""),
+            fields.get("Description", ""),
+        )
+        if v
+    )
     return {
+        "description": description,
         "org_id": entity.get("id"),
         "name": entity.get("name") or "(no name)",
         "domain": entity.get("domain")
@@ -197,6 +210,9 @@ def _iter_pipeline_entries() -> Iterator[dict]:
                         STATUS_FIELD_ID,
                         OWNERS_FIELD_ID,
                         MOTIVO_LOST_FIELD_ID,
+                        DESCRICAO_FIELD_ID,
+                        BLURB_FIELD_ID,
+                        ENRICHED_DESCRIPTION_FIELD_ID,
                     ],
                 },
             )
@@ -210,6 +226,7 @@ def _iter_pipeline_entries() -> Iterator[dict]:
 def search_pipeline(
     sector: Optional[str] = None,
     status: Optional[str] = None,
+    keyword: Optional[str] = None,
     limit: int = 20,
 ) -> str:
     """Browse Caravela's Pipeline dealflow list, newest first, with filters.
@@ -218,12 +235,15 @@ def search_pipeline(
         sector: Optional Setor filter (accent/case-insensitive substring,
             e.g. 'saude' matches 'Saúde').
         status: Optional Status filter (same matching, e.g. 'deep dive').
+        keyword: Optional free-text filter matched against each company's
+            name and description columns (Descrição/Blurb/enriched). Use for
+            sub-sector questions, e.g. 'crossborder', 'fx', 'consignado'.
         limit: Maximum number of companies to return (default 20).
 
     Returns:
         A formatted string with matching companies (name, org id, domain,
-        sector, status, owners, date added) plus a note on how much of the
-        list was scanned, or a readable error message.
+        sector, status, owners, short description, date added) plus a note
+        on how much of the list was scanned, or a readable error message.
     """
     try:
         limit = max(1, min(int(limit or 20), 50))
@@ -237,6 +257,10 @@ def search_pipeline(
                 continue
             if status and _norm(status) not in _norm(entry["status"]):
                 continue
+            if keyword:
+                blob = _norm(f"{entry['name']} {entry.get('description', '')}")
+                if _norm(keyword) not in blob:
+                    continue
             matches.append(entry)
             if len(matches) >= limit:
                 break
@@ -246,6 +270,8 @@ def search_pipeline(
             filters.append(f"sector~'{sector}'")
         if status:
             filters.append(f"status~'{status}'")
+        if keyword:
+            filters.append(f"keyword~'{keyword}'")
         filter_desc = " and ".join(filters) or "no filters"
 
         coverage = (
@@ -259,7 +285,9 @@ def search_pipeline(
             return (
                 f"No Pipeline companies matched {filter_desc} {coverage}. "
                 "Check the sector spelling — Setor values are in Portuguese "
-                "(e.g. 'Saúde', 'Fintech', 'Logística', 'Educação')."
+                "(e.g. 'Saúde', 'Fintech', 'Logística', 'Educação'). For "
+                "keywords, try Portuguese and English variants (e.g. "
+                "'cambio' and 'fx')."
             )
 
         lines = [f"{len(matches)} Pipeline companies for {filter_desc} {coverage}:"]
@@ -275,8 +303,10 @@ def search_pipeline(
                 )
                 if v
             )
+            desc = (m.get("description") or "")[:200]
+            desc_part = f"\n  desc: {desc}" if desc else ""
             lines.append(
-                f"- {m['name']} (id: {m['org_id']}, domain: {m['domain']}) — {details}"
+                f"- {m['name']} (id: {m['org_id']}, domain: {m['domain']}) — {details}{desc_part}"
             )
         return "\n".join(lines)
     except requests.HTTPError as e:
