@@ -51,11 +51,17 @@ def require_login() -> str:
 
     email = (st.user.email or "").lower()
     allowed_domain = os.environ.get("ALLOWED_DOMAIN", "").lower().lstrip("@")
-    if not allowed_domain or not email.endswith("@" + allowed_domain):
+    allowed_emails = {
+        e.strip().lower()
+        for e in os.environ.get("ALLOWED_EMAILS", "").split(",")
+        if e.strip()
+    }
+    domain_ok = bool(allowed_domain) and email.endswith("@" + allowed_domain)
+    if not (domain_ok or email in allowed_emails):
         st.title("🧭 Caravela Knowledge Bot")
         st.error(
             f"Acesso negado 😕 — a conta **{email or 'desconhecida'}** não "
-            f"pertence ao domínio autorizado. Faça login com sua conta "
+            f"está autorizada. Faça login com sua conta "
             f"@{allowed_domain or '(ALLOWED_DOMAIN não configurado)'}."
         )
         if st.button("Sair e tentar com outra conta"):
