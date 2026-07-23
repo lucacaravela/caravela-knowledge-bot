@@ -133,6 +133,31 @@ def _extract_pdf_text(data: bytes) -> str:
     return "\n".join(pages)
 
 
+def _extract_xlsx_text(data: bytes) -> str:
+    """Extract cell values from an .xlsx workbook as tab-separated text."""
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    parts = []
+    total = 0
+    for sheet in workbook.worksheets:
+        parts.append(f"=== Sheet: {sheet.title} ===")
+        for row in sheet.iter_rows(values_only=True):
+            cells = [str(c) for c in row if c is not None]
+            if not cells:
+                continue
+            line = "\t".join(cells)
+            parts.append(line)
+            total += len(line)
+            if total > MAX_FILE_CHARS * 2:
+                parts.append("[sheet truncated]")
+                break
+        if total > MAX_FILE_CHARS * 2:
+            break
+    workbook.close()
+    return "\n".join(parts)
+
+
 def _truncate(text: str) -> str:
     if len(text) > MAX_FILE_CHARS:
         return (
@@ -169,6 +194,7 @@ def read_drive_file(file_id: str) -> str:
                 f"/files/{file_id}/export",
                 params={"mimeType": EXPORT_FORMATS[mime]},
             )
+            resp.encoding = "utf-8-sig"  # exports are UTF-8 with BOM
             text = resp.text
         elif mime == "application/pdf":
             resp = _drive_get(
@@ -176,6 +202,18 @@ def read_drive_file(file_id: str) -> str:
                 params={"alt": "media", "supportsAllDrives": "true"},
             )
             text = _extract_pdf_text(resp.content)
+            if not text.strip():
+                return (
+                    f"File '{name}' is a PDF without extractable text "
+                    "(likely image-based, e.g. an exported design deck). "
+                    "Its content cannot be read."
+                )
+        elif mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+            resp = _drive_get(
+                f"/files/{file_id}",
+                params={"alt": "media", "supportsAllDrives": "true"},
+            )
+            text = _extract_xlsx_text(resp.content)
         elif mime.startswith("text/") or mime in (
             "application/json",
             "application/csv",
@@ -184,12 +222,13 @@ def read_drive_file(file_id: str) -> str:
                 f"/files/{file_id}",
                 params={"alt": "media", "supportsAllDrives": "true"},
             )
+            resp.encoding = "utf-8-sig"
             text = resp.text
         else:
             return (
                 f"File '{name}' has unsupported type '{mime}'. "
-                "Only Google Docs/Sheets/Slides, PDFs and plain text files "
-                "can be read."
+                "Supported: Google Docs/Sheets/Slides, PDFs, .xlsx and "
+                "plain text files."
             )
 
         text = (text or "").strip()

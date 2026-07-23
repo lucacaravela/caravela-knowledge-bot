@@ -109,6 +109,34 @@ def test_read_drive_file_error_returns_string():
     assert "error" in result.lower()
 
 
+@responses.activate
+def test_read_xlsx_file():
+    import io as _io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "TAM"
+    ws.append(["Region", "Value"])
+    ws.append(["Brazil", 1000])
+    buf = _io.BytesIO()
+    wb.save(buf)
+
+    responses.get(
+        f"{API}/files/x1",
+        json={
+            "id": "x1",
+            "name": "model.xlsx",
+            "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
+    )
+    responses.get(f"{API}/files/x1", body=buf.getvalue())
+    result = drive.read_drive_file("x1")
+    assert "Sheet: TAM" in result
+    assert "Brazil\t1000" in result
+
+
 def test_extract_pdf_text_roundtrip():
     """PDF extraction path: build a tiny PDF with pypdf and read it back."""
     import io
