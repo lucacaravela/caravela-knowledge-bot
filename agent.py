@@ -40,9 +40,15 @@ document each claim came from (e.g. "according to the notes on Acme" or \
 "per the memo 'Healthcare LatAm 2024'").
 - Never guess or invent companies, metrics, or document contents. If the \
 tools return nothing, say clearly that nothing was found.
-- For sector questions ("what fintech companies have we seen?"): first query \
-Affinity for companies in that sector, then pull the notes for the most \
-relevant ones, then search Drive for related memos, and only then answer.
+- For sector questions ("what fintech companies have we seen?"): use \
+search_pipeline with the Portuguese Setor value (e.g. healthcare -> 'Saúde', \
+education -> 'Educação'), then pull notes for the most relevant companies, \
+then search Drive for related memos, and only then answer. Use search_orgs \
+only when looking up companies by name.
+- Dealflow context: the Pipeline list is the fund's dealflow. Its Status \
+values run from 'Linkedin'/'New Lead'/'Pré-pipe' (early) through 'Analise \
+Preliminar'/'Deep Dive'/'Termsheet' (active work) to 'Won'/'Pass'/'Lost'. \
+The 'Investidas' list holds portfolio companies.
 - If a Drive search returns nothing, retry with 2 or 3 alternative phrasings \
 before concluding there are no documents — try both Portuguese and English \
 terms (e.g. "saúde" and "healthcare", "memo" and "tese").
@@ -57,13 +63,49 @@ companies and documents."""
 
 TOOLS = [
     {
+        "name": "search_pipeline",
+        "description": (
+            "Browse Caravela's dealflow (the Affinity 'Pipeline' list), newest "
+            "companies first, optionally filtered by sector and/or status. This "
+            "is the right tool for sector questions. Matching is accent- and "
+            "case-insensitive substring ('saude' matches 'Saúde'). Setor values "
+            "are in Portuguese; the main options: Agro, Alimentício, Beleza, "
+            "Big Data, Biotecnologia, Construção, Crédito, Cripto/Blockchain, "
+            "E-commerce, Educação, Energia, ESG, Fintech, Games, Gestão, "
+            "Imobiliario, Jurídico, Logística, Marketing, Mobilidade, Pet, "
+            "Produtividade, RH, Saúde, Segurança, Seguros, Serviços, Tecnologia, "
+            "Varejo, Vendas, Wealthtech. Status options include: Linkedin, New "
+            "Lead, Pré-pipe, Analise Preliminar, Deep Dive, Termsheet, Won, "
+            "Pass, Lost, On Hold. Returns name, org id, domain, sector, status, "
+            "owners and date added."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "sector": {
+                    "type": "string",
+                    "description": "Optional Setor filter in Portuguese (e.g. 'Saúde', 'Fintech', 'Logística').",
+                },
+                "status": {
+                    "type": "string",
+                    "description": "Optional Status filter (e.g. 'Deep Dive', 'Termsheet', 'Won').",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max companies to return (default 20, max 50).",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "search_orgs",
         "description": (
-            "Search organizations in Affinity CRM by name or keyword, with an "
-            "optional sector/industry filter. Returns up to 20 matches with "
-            "name, domain, organization id and key field values (sector, "
-            "stage, status, owner). Use the returned id with get_org_details "
-            "and get_notes."
+            "Search organizations in Affinity CRM by NAME or name keyword. "
+            "Returns up to 20 matches with name, domain, organization id and "
+            "key field values (sector, status, owner). Use the returned id "
+            "with get_org_details and get_notes. Note: this matches company "
+            "names, not sectors — for sector questions use search_pipeline."
         ),
         "input_schema": {
             "type": "object",
@@ -155,6 +197,7 @@ TOOLS = [
 ]
 
 _TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
+    "search_pipeline": affinity.search_pipeline,
     "search_orgs": affinity.search_orgs,
     "get_org_details": affinity.get_org_details,
     "get_notes": affinity.get_notes,

@@ -1,5 +1,6 @@
 """Unit tests for the Affinity module, with mocked HTTP responses."""
 
+import pytest
 import responses
 
 import affinity
@@ -7,14 +8,145 @@ import affinity
 
 V1 = affinity.V1_BASE
 V2 = affinity.V2_BASE
+PIPELINE = affinity.PIPELINE_LIST_ID
 
 
-def _mock_v2_company(rsps, org_id, fields=None, name="Acme", domain="acme.com"):
+@pytest.fixture(autouse=True)
+def clear_pipeline_cache():
+    affinity._reset_pipeline_cache()
+    yield
+    affinity._reset_pipeline_cache()
+
+
+def _entry(org_id, name, sector="", status="", created="2026-01-10T00:00:00Z"):
+    fields = []
+    if sector:
+        fields.append(
+            {"id": "field-394528", "name": "Setor", "value": {"type": "dropdown", "data": {"text": sector}}}
+        )
+    if status:
+        fields.append(
+            {"id": "field-278853", "name": "Status", "value": {"type": "ranked-dropdown", "data": {"text": status}}}
+        )
+    return {
+        "id": org_id * 10,
+        "listId": PIPELINE,
+        "createdAt": created,
+        "entity": {"id": org_id, "name": name, "domain": f"{name.lower()}.com", "fields": fields},
+    }
+
+
+def _mock_org_list_entries(rsps, org_id, sector="", status=""):
+    fields = []
+    if sector:
+        fields.append({"name": "Setor", "value": {"data": {"text": sector}}})
+    if status:
+        fields.append({"name": "Status", "value": {"data": {"text": status}}})
     rsps.get(
-        f"{V2}/companies/{org_id}",
-        json={"id": org_id, "name": name, "domain": domain, "fields": fields or []},
+        f"{V2}/companies/{org_id}/list-entries",
+        json={"data": [{"listId": PIPELINE, "listName": "Pipeline", "fields": fields}]},
     )
 
+
+# ---------------------------------------------------------------------------
+# search_pipeline
+# ---------------------------------------------------------------------------
+
+@responses.activate
+def test_search_pipeline_filters_by_sector_accent_insensitive():
+    responses.get(
+        f"{V2}/lists/{PIPELINE}/list-entries",
+        json={
+            "data": [
+                _entry(1, "HealthCo", sector="Saúde", status="Deep Dive"),
+                _entry(2, "FinCo", sector="Fintech", status="New Lead"),
+                _entry(3, "MedCo", sector="Saúde", status="Pass"),
+            ],
+            "pagination": {"nextUrl": None},
+        },
+    )
+    result = affinity.search_pipeline(sector="saude")
+    assert "HealthCo" in result
+    assert "MedCo" in result
+    assert "FinCo" not in result
+    assert "entire Pipeline list" in result
+
+
+@responses.activate
+def test_search_pipeline_filters_by_status():
+    responses.get(
+        f"{V2}/lists/{PIPELINE}/list-entries",
+        json={
+            "data": [
+                _entry(1, "HealthCo", sector="Saúde", status="Deep Dive"),
+                _entry(2, "FinCo", sector="Fintech", status="New Lead"),
+            ],
+            "pagination": {"nextUrl": None},
+        },
+    )
+    result = affinity.search_pipeline(status="deep dive")
+    assert "HealthCo" in result
+    assert "FinCo" not in result
+
+
+@responses.activate
+def test_search_pipeline_paginates_with_next_url():
+    next_url = f"{V2}/lists/{PIPELINE}/list-entries?cursor=abc"
+    responses.get(
+        f"{V2}/lists/{PIPELINE}/list-entries",
+        json={
+            "data": [_entry(1, "FinCo", sector="Fintech")],
+            "pagination": {"nextUrl": next_url},
+        },
+    )
+    responses.get(
+        next_url,
+        json={
+            "data": [_entry(2, "HealthCo", sector="Saúde")],
+            "pagination": {"nextUrl": None},
+        },
+    )
+    result = affinity.search_pipeline(sector="Saúde")
+    assert "HealthCo" in result
+
+
+@responses.activate
+def test_search_pipeline_uses_cache_on_second_call():
+    responses.get(
+        f"{V2}/lists/{PIPELINE}/list-entries",
+        json={
+            "data": [_entry(1, "HealthCo", sector="Saúde")],
+            "pagination": {"nextUrl": None},
+        },
+    )
+    affinity.search_pipeline(sector="Saúde")
+    # Second call must not hit the network again (only one mock registered).
+    result = affinity.search_pipeline(sector="Fintech")
+    assert "No Pipeline companies matched" in result
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+def test_search_pipeline_no_match_mentions_portuguese():
+    responses.get(
+        f"{V2}/lists/{PIPELINE}/list-entries",
+        json={"data": [_entry(1, "FinCo", sector="Fintech")], "pagination": {"nextUrl": None}},
+    )
+    result = affinity.search_pipeline(sector="healthcare")
+    assert "No Pipeline companies matched" in result
+    assert "Portuguese" in result
+
+
+@responses.activate
+def test_search_pipeline_error_returns_string():
+    responses.get(f"{V2}/lists/{PIPELINE}/list-entries", status=500)
+    result = affinity.search_pipeline(sector="Saúde")
+    assert "error" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# search_orgs
+# ---------------------------------------------------------------------------
 
 @responses.activate
 def test_search_orgs_returns_matches_with_fields():
@@ -27,22 +159,14 @@ def test_search_orgs_returns_matches_with_fields():
             ]
         },
     )
-    _mock_v2_company(
-        responses,
-        1,
-        fields=[
-            {"name": "Sector", "value": {"type": "dropdown", "data": {"text": "Healthcare"}}},
-            {"name": "Status", "value": "In DD"},
-        ],
-        name="HealthTech Co",
-    )
-    _mock_v2_company(responses, 2, fields=[], name="FinCo")
+    _mock_org_list_entries(responses, 1, sector="Saúde", status="Deep Dive")
+    _mock_org_list_entries(responses, 2)
 
     result = affinity.search_orgs("health")
     assert "HealthTech Co" in result
     assert "id: 1" in result
-    assert "sector: Healthcare" in result
-    assert "status: In DD" in result
+    assert "sector: Saúde" in result
+    assert "status: Deep Dive" in result
     assert "FinCo" in result
 
 
@@ -57,20 +181,10 @@ def test_search_orgs_sector_filter():
             ]
         },
     )
-    _mock_v2_company(
-        responses,
-        1,
-        fields=[{"name": "Industry", "value": "Healthcare SaaS"}],
-        name="HealthTech Co",
-    )
-    _mock_v2_company(
-        responses,
-        2,
-        fields=[{"name": "Industry", "value": "Fintech"}],
-        name="FinCo",
-    )
+    _mock_org_list_entries(responses, 1, sector="Saúde")
+    _mock_org_list_entries(responses, 2, sector="Fintech")
 
-    result = affinity.search_orgs("co", sector="healthcare")
+    result = affinity.search_orgs("co", sector="saude")
     assert "HealthTech Co" in result
     assert "FinCo" not in result
 
@@ -90,25 +204,36 @@ def test_search_orgs_http_error_returns_string():
     assert "401" in result
 
 
+# ---------------------------------------------------------------------------
+# get_org_details
+# ---------------------------------------------------------------------------
+
 @responses.activate
 def test_get_org_details_includes_fields_and_lists():
-    _mock_v2_company(
-        responses,
-        42,
-        fields=[
-            {"name": "Sector", "value": {"data": {"text": "Logistics"}}},
-            {"name": "Owner", "value": {"firstName": "Ana", "lastName": "Silva"}},
-        ],
-        name="LogiCo",
-        domain="logico.com",
+    responses.get(
+        f"{V2}/companies/42",
+        json={
+            "id": 42,
+            "name": "LogiCo",
+            "domain": "logico.com",
+            "fields": [
+                {"name": "Blurb", "value": {"type": "text", "data": "Freight marketplace"}},
+                {"name": "Description", "value": {"type": "text", "data": None}},
+            ],
+        },
     )
     responses.get(
         f"{V2}/companies/42/list-entries",
         json={
             "data": [
                 {
-                    "list": {"name": "Dealflow"},
-                    "fields": [{"name": "Status", "value": "First Meeting"}],
+                    "listId": PIPELINE,
+                    "listName": "Pipeline",
+                    "createdAt": "2026-05-01T00:00:00Z",
+                    "fields": [
+                        {"name": "Status", "value": {"data": {"text": "First Meeting"}}},
+                        {"name": "Setor", "value": {"data": {"text": "Logística"}}},
+                    ],
                 }
             ]
         },
@@ -116,10 +241,11 @@ def test_get_org_details_includes_fields_and_lists():
 
     result = affinity.get_org_details(42)
     assert "LogiCo" in result
-    assert "Sector: Logistics" in result
-    assert "Owner: Ana Silva" in result
-    assert "Dealflow" in result
-    assert "status: First Meeting" in result
+    assert "Blurb: Freight marketplace" in result
+    assert "Description" not in result  # empty values are dropped
+    assert "Pipeline (added 2026-05-01)" in result
+    assert "Status: First Meeting" in result
+    assert "Setor: Logística" in result
 
 
 @responses.activate
@@ -128,6 +254,10 @@ def test_get_org_details_error_returns_string():
     result = affinity.get_org_details(99)
     assert "error" in result.lower()
 
+
+# ---------------------------------------------------------------------------
+# get_notes
+# ---------------------------------------------------------------------------
 
 @responses.activate
 def test_get_notes_sorted_newest_first_and_truncated():

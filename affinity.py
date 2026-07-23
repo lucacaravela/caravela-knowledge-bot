@@ -4,9 +4,16 @@ Affinity exposes two APIs that share the same API key but use different
 auth schemes:
 
 * v2 (https://api.affinity.co/v2) - Bearer token auth. Companies, lists,
-  field data.
+  list entries and field data. Note: ``fieldTypes`` only accepts
+  ``enriched``, ``global`` and ``relationship-intelligence`` — list-scoped
+  fields (Setor, Status, Owners) come via list-entry endpoints instead.
 * v1 (https://api.affinity.co) - HTTP Basic auth with an empty username
-  and the API key as the password. Notes are only available here.
+  and the API key as the password. Notes and name search live here.
+
+Caravela's dealflow is the "Pipeline" list (id 31953), whose entries are
+returned newest-first. Its key list fields: Setor (field-394528, Portuguese
+dropdown incl. 'Saúde', 'Fintech', ...), Status (field-278853) and Owners
+(field-278854).
 
 Every public function returns a plain string (formatted result or a
 readable error message) so a failed call never kills the agent loop.
@@ -15,7 +22,9 @@ readable error message) so a failed call never kills the agent loop.
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+import time
+import unicodedata
+from typing import Any, Iterator, Optional
 
 import requests
 
@@ -24,10 +33,34 @@ V2_BASE = "https://api.affinity.co/v2"
 
 REQUEST_TIMEOUT = 30
 
+PIPELINE_LIST_ID = int(os.environ.get("AFFINITY_PIPELINE_LIST_ID", "31953"))
+SETOR_FIELD_ID = "field-394528"
+STATUS_FIELD_ID = "field-278853"
+OWNERS_FIELD_ID = "field-278854"
+
 # Caps so tool output does not explode the model context.
 MAX_SEARCH_RESULTS = 20
 MAX_NOTE_CHARS = 2_000
 MAX_TOTAL_NOTE_CHARS = 15_000
+
+# Pipeline scan settings: pages of 100, newest entries first.
+PIPELINE_PAGE_SIZE = 100
+MAX_PIPELINE_SCAN = 3_000
+PIPELINE_CACHE_TTL = 900  # seconds
+
+_pipeline_cache: dict = {
+    "fetched_at": 0.0,
+    "entries": [],
+    "next_url": None,
+    "exhausted": False,
+}
+
+
+def _reset_pipeline_cache() -> None:
+    """Clear the in-memory Pipeline cache (used by tests)."""
+    _pipeline_cache.update(
+        fetched_at=0.0, entries=[], next_url=None, exhausted=False
+    )
 
 
 def _api_key() -> str:
@@ -51,14 +84,26 @@ def _v1_get(path: str, params: Optional[dict] = None) -> Any:
 
 def _v2_get(path: str, params: Optional[dict] = None) -> Any:
     """GET against the v2 API (Bearer token auth)."""
+    return _v2_get_url(f"{V2_BASE}{path}", params)
+
+
+def _v2_get_url(url: str, params: Optional[dict] = None) -> Any:
+    """GET an absolute v2 URL (used for pagination nextUrl links)."""
     resp = requests.get(
-        f"{V2_BASE}{path}",
+        url,
         params=params,
         headers={"Authorization": f"Bearer {_api_key()}"},
         timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def _norm(text: Any) -> str:
+    """Lowercase and strip accents, so 'saude' matches 'Saúde'."""
+    text = str(text or "")
+    decomposed = unicodedata.normalize("NFD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
 
 
 def _stringify(value: Any) -> str:
@@ -74,7 +119,7 @@ def _stringify(value: Any) -> str:
         return ", ".join(p for p in parts if p)
     if isinstance(value, dict):
         # Common v2 shapes: {"type": ..., "data": ...}, {"text": ...},
-        # {"name": ...}, dropdown options, person refs, etc.
+        # person refs, dropdown options, etc.
         for key in ("data", "text", "name", "value", "term"):
             if key in value:
                 return _stringify(value[key])
@@ -87,51 +132,188 @@ def _stringify(value: Any) -> str:
     return str(value)
 
 
-def _extract_key_fields(fields: list) -> dict:
-    """Pick sector / stage / status / owner style fields from a v2 field list."""
-    wanted = {
-        "sector": ("sector", "industry", "setor", "vertical", "category"),
-        "stage": ("stage", "estagio", "estágio", "round"),
-        "status": ("status",),
-        "owner": ("owner", "responsavel", "responsável", "lead"),
-    }
-    found: dict = {}
+def _field_map(fields: Any) -> dict:
+    """Turn a v2 field list into {field name: non-empty string value}."""
+    out: dict = {}
     for field in fields or []:
         if not isinstance(field, dict):
             continue
-        name = str(field.get("name", "")).lower()
+        name = str(field.get("name") or field.get("id") or "?")
         text = _stringify(field.get("value"))
-        if not text:
-            continue
-        for key, needles in wanted.items():
-            if key not in found and any(n in name for n in needles):
-                found[key] = text
-    return found
+        if text and name not in out:
+            out[name] = text
+    return out
 
 
-def _fetch_v2_fields(org_id: Any) -> list:
-    """Fetch v2 field data for one company. Returns [] on any failure."""
-    try:
-        data = _v2_get(
-            f"/companies/{org_id}",
-            params={"fieldTypes": ["global", "list", "enriched"]},
+def _simplify_pipeline_entry(entry: dict) -> dict:
+    entity = entry.get("entity") or {}
+    fields = _field_map(entity.get("fields"))
+    return {
+        "org_id": entity.get("id"),
+        "name": entity.get("name") or "(no name)",
+        "domain": entity.get("domain")
+        or ", ".join(entity.get("domains") or [])
+        or "-",
+        "sector": fields.get("Setor", ""),
+        "status": fields.get("Status", ""),
+        "owners": fields.get("Owners", ""),
+        "added": (entry.get("createdAt") or "")[:10],
+    }
+
+
+def _iter_pipeline_entries() -> Iterator[dict]:
+    """Yield simplified Pipeline entries newest-first, fetching pages lazily.
+
+    Pages already fetched are served from a module-level cache (TTL 15 min)
+    shared across questions, so repeated sector searches are cheap.
+    """
+    cache = _pipeline_cache
+    if time.time() - cache["fetched_at"] > PIPELINE_CACHE_TTL:
+        cache.update(
+            fetched_at=time.time(), entries=[], next_url=None, exhausted=False
         )
-        return data.get("fields") or []
+
+    index = 0
+    while True:
+        while index < len(cache["entries"]):
+            yield cache["entries"][index]
+            index += 1
+        if cache["exhausted"] or len(cache["entries"]) >= MAX_PIPELINE_SCAN:
+            return
+        if cache["next_url"]:
+            data = _v2_get_url(cache["next_url"])
+        else:
+            data = _v2_get(
+                f"/lists/{PIPELINE_LIST_ID}/list-entries",
+                params={
+                    "limit": PIPELINE_PAGE_SIZE,
+                    "fieldIds": [SETOR_FIELD_ID, STATUS_FIELD_ID, OWNERS_FIELD_ID],
+                },
+            )
+        page = data.get("data") or []
+        cache["entries"].extend(_simplify_pipeline_entry(e) for e in page)
+        cache["next_url"] = (data.get("pagination") or {}).get("nextUrl")
+        if not page or not cache["next_url"]:
+            cache["exhausted"] = True
+
+
+def search_pipeline(
+    sector: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 20,
+) -> str:
+    """Browse Caravela's Pipeline dealflow list, newest first, with filters.
+
+    Args:
+        sector: Optional Setor filter (accent/case-insensitive substring,
+            e.g. 'saude' matches 'Saúde').
+        status: Optional Status filter (same matching, e.g. 'deep dive').
+        limit: Maximum number of companies to return (default 20).
+
+    Returns:
+        A formatted string with matching companies (name, org id, domain,
+        sector, status, owners, date added) plus a note on how much of the
+        list was scanned, or a readable error message.
+    """
+    try:
+        limit = max(1, min(int(limit or 20), 50))
+        matches: list = []
+        scanned = 0
+        oldest = ""
+        for entry in _iter_pipeline_entries():
+            scanned += 1
+            oldest = entry["added"] or oldest
+            if sector and _norm(sector) not in _norm(entry["sector"]):
+                continue
+            if status and _norm(status) not in _norm(entry["status"]):
+                continue
+            matches.append(entry)
+            if len(matches) >= limit:
+                break
+
+        filters = []
+        if sector:
+            filters.append(f"sector~'{sector}'")
+        if status:
+            filters.append(f"status~'{status}'")
+        filter_desc = " and ".join(filters) or "no filters"
+
+        coverage = (
+            f"(scanned the {scanned} most recent Pipeline entries, back to "
+            f"{oldest or '?'}; older entries were not scanned)"
+        )
+        if _pipeline_cache["exhausted"] and scanned >= len(_pipeline_cache["entries"]):
+            coverage = f"(scanned the entire Pipeline list, {scanned} entries)"
+
+        if not matches:
+            return (
+                f"No Pipeline companies matched {filter_desc} {coverage}. "
+                "Check the sector spelling — Setor values are in Portuguese "
+                "(e.g. 'Saúde', 'Fintech', 'Logística', 'Educação')."
+            )
+
+        lines = [f"{len(matches)} Pipeline companies for {filter_desc} {coverage}:"]
+        for m in matches:
+            details = "; ".join(
+                f"{k}: {v}"
+                for k, v in (
+                    ("setor", m["sector"]),
+                    ("status", m["status"]),
+                    ("owners", m["owners"]),
+                    ("added", m["added"]),
+                )
+                if v
+            )
+            lines.append(
+                f"- {m['name']} (id: {m['org_id']}, domain: {m['domain']}) — {details}"
+            )
+        return "\n".join(lines)
+    except requests.HTTPError as e:
+        return f"Affinity API error while browsing the Pipeline list: {e}"
+    except Exception as e:
+        return f"Error browsing the Affinity Pipeline list: {e}"
+
+
+def _org_list_entries(org_id: Any) -> list:
+    """Fetch v2 list entries (with fields) for one company. [] on failure."""
+    try:
+        data = _v2_get(f"/companies/{org_id}/list-entries")
+        return data.get("data") or []
     except Exception:
         return []
 
 
+def _extract_key_fields(entries: list) -> dict:
+    """Pick sector/status/owner values from a company's list entries."""
+    found: dict = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        fields = _field_map(entry.get("fields"))
+        for name, value in fields.items():
+            lname = name.lower()
+            if "setor" in lname or "sector" in lname:
+                found.setdefault("sector", value)
+            elif "status" in lname:
+                found.setdefault("status", value)
+            elif "owner" in lname:
+                found.setdefault("owner", value)
+    return found
+
+
 def search_orgs(query: str, sector: Optional[str] = None) -> str:
-    """Search Affinity organizations by name/keyword, optionally filter by sector.
+    """Search Affinity organizations by name, optionally filter by sector.
+
+    Name/keyword search via the v1 API, enriched with Pipeline field data
+    (sector, status, owner) from the v2 API. For sector-wide questions
+    prefer search_pipeline, which browses the dealflow list directly.
 
     Args:
-        query: Name or keyword to search for.
-        sector: Optional sector/industry filter, matched against the
-            organization's sector-like field values (case-insensitive).
+        query: Name or keyword to search for (matches organization names).
+        sector: Optional sector filter (accent/case-insensitive).
 
     Returns:
-        A formatted string with up to 20 matches (name, domain, id and key
-        field values), or a readable error message.
+        A formatted string with up to 20 matches, or a readable error.
     """
     try:
         data = _v1_get("/organizations", params={"term": query, "page_size": 50})
@@ -149,11 +331,10 @@ def search_orgs(query: str, sector: Optional[str] = None) -> str:
                 or ", ".join(org.get("domains") or [])
                 or "-",
             }
-            entry["fields"] = _extract_key_fields(_fetch_v2_fields(org_id))
+            entry["fields"] = _extract_key_fields(_org_list_entries(org_id))
             if sector:
-                sector_val = entry["fields"].get("sector", "")
-                blob = f"{sector_val} {entry['name']}".lower()
-                if sector.lower() not in blob:
+                blob = _norm(f"{entry['fields'].get('sector', '')} {entry['name']}")
+                if _norm(sector) not in blob:
                     continue
             results.append(entry)
             if len(results) >= MAX_SEARCH_RESULTS:
@@ -162,14 +343,14 @@ def search_orgs(query: str, sector: Optional[str] = None) -> str:
         if not results:
             return (
                 f"Found {len(orgs)} organizations for '{query}' but none matched "
-                f"sector filter '{sector}'. Try without the sector filter."
+                f"sector filter '{sector}'. Try without the sector filter, or "
+                "use search_pipeline for sector-wide questions."
             )
 
         lines = [f"Found {len(results)} organizations for '{query}':"]
         for r in results:
-            fields = r["fields"]
             extras = "; ".join(
-                f"{k}: {v}" for k, v in fields.items()
+                f"{k}: {v}" for k, v in r["fields"].items()
             ) or "no field data"
             lines.append(
                 f"- {r['name']} (id: {r['id']}, domain: {r['domain']}) — {extras}"
@@ -188,58 +369,44 @@ def get_org_details(org_id: int) -> str:
         org_id: The Affinity organization/company id.
 
     Returns:
-        A formatted string with all field values and list memberships
-        (including status per list), or a readable error message.
+        A formatted string with all non-empty global/enriched field values
+        and every list the company is on (with per-list field values such
+        as Status and Setor), or a readable error message.
     """
     try:
         company = _v2_get(
             f"/companies/{org_id}",
-            params={"fieldTypes": ["global", "list", "enriched"]},
+            params={"fieldTypes": ["global", "enriched"]},
         )
         name = company.get("name") or f"Company {org_id}"
         domain = company.get("domain") or ", ".join(company.get("domains") or [])
         lines = [f"{name} (id: {org_id}, domain: {domain or '-'})"]
 
-        fields = company.get("fields") or []
+        fields = _field_map(company.get("fields"))
         if fields:
             lines.append("Fields:")
-            for field in fields:
-                if not isinstance(field, dict):
-                    continue
-                fname = field.get("name") or field.get("id") or "?"
-                fval = _stringify(field.get("value"))
-                if fval:
-                    lines.append(f"  - {fname}: {fval}")
+            for fname, fval in fields.items():
+                lines.append(f"  - {fname}: {fval[:300]}")
         else:
-            lines.append("Fields: none available")
+            lines.append("Fields: none filled in")
 
-        # List memberships and per-list status.
-        try:
-            entries_data = _v2_get(f"/companies/{org_id}/list-entries")
-            entries = entries_data.get("data") or entries_data.get("listEntries") or []
-        except Exception:
-            entries = []
-
+        entries = _org_list_entries(org_id)
         if entries:
             lines.append("Lists:")
             for entry in entries:
-                if not isinstance(entry, dict):
-                    continue
-                lst = entry.get("list") or {}
                 list_name = (
-                    lst.get("name")
-                    or entry.get("listName")
+                    entry.get("listName")
                     or f"list {entry.get('listId', '?')}"
                 )
-                status = ""
-                for field in entry.get("fields") or []:
-                    if isinstance(field, dict) and "status" in str(
-                        field.get("name", "")
-                    ).lower():
-                        status = _stringify(field.get("value"))
-                        break
-                suffix = f" — status: {status}" if status else ""
-                lines.append(f"  - {list_name}{suffix}")
+                added = (entry.get("createdAt") or "")[:10]
+                entry_fields = _field_map(entry.get("fields"))
+                interesting = "; ".join(
+                    f"{k}: {v[:120]}"
+                    for k, v in entry_fields.items()
+                    if k.lower() in ("status", "setor", "sector", "owners", "owner 2", "país", "priority", "motivo lost")
+                )
+                suffix = f" — {interesting}" if interesting else ""
+                lines.append(f"  - {list_name} (added {added or '?'}){suffix}")
         else:
             lines.append("Lists: not on any list (or list data unavailable)")
 
@@ -260,7 +427,7 @@ def get_notes(org_id: int) -> str:
         org_id: The Affinity organization id.
 
     Returns:
-        A formatted string with the notes (author id + date + content),
+        A formatted string with the notes (author + date + content),
         or a readable error message.
     """
     try:
