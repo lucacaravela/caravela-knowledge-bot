@@ -150,7 +150,33 @@ with their own Google accounts.
 
 ---
 
-## 6. Troubleshooting
+## 6. WhatsApp bot (optional)
+
+A second entry point (`whatsapp_app.py`) serves the same bot on WhatsApp
+via the Meta Cloud API. Pilot setup with Meta's free test number:
+
+1. https://developers.facebook.com → Create App → use case **"Connect with
+   customers through WhatsApp"** → create/select the business portfolio.
+2. In the app: WhatsApp use case → **API Setup**. Copy the temporary
+   **access token** and the **Phone number ID**, and register up to 5 team
+   phone numbers as test recipients.
+3. Deploy the `caravela-whatsapp-bot` service (already in `render.yaml`)
+   and set: `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
+   `WHATSAPP_VERIFY_TOKEN` (any string you invent), `WHATSAPP_APP_SECRET`
+   (App settings → Basic), `ALLOWED_PHONES` (comma-separated, digits only,
+   with country code), plus `ANTHROPIC_API_KEY` and `AFFINITY_API_KEY`.
+4. In the Meta app, configure the webhook: callback URL
+   `https://caravela-whatsapp-bot.onrender.com/webhook`, verify token =
+   the same `WHATSAPP_VERIFY_TOKEN`, and subscribe to the **messages**
+   field.
+5. Message the test number from a registered phone.
+
+Production later: real phone number + Meta business verification (CNPJ),
+a permanent token via a system user, and the Render Starter plan so the
+webhook never cold-starts. The temporary token expires every 24h — fine
+for the pilot only.
+
+## 7. Troubleshooting
 
 **Affinity returns 401 Unauthorized**
 The two Affinity APIs use different auth schemes: v2
