@@ -21,7 +21,7 @@ import drive
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 MAX_TOKENS = 8_192
-MAX_TOOL_CALLS = 10
+MAX_TOOL_CALLS = int(os.environ.get("MAX_TOOL_CALLS", "25"))
 MAX_API_RETRIES = 4
 
 SYSTEM_PROMPT = """You are Caravela Capital's internal knowledge assistant. \
@@ -86,9 +86,10 @@ the user asks for it; if you do include it, label it clearly as general \
 knowledge, not internal data.
 - Structure for company answers: one-line description, then key data \
 (sector, status, owner, dates), then takeaways.
-- You have a budget of at most 10 tool calls per question — use them \
-deliberately: search broadly first, then drill into only the most relevant \
-companies and documents."""
+- You have a budget of at most 25 tool calls per question. Use them \
+deliberately but do not ration excessively: it is better to fetch all the \
+data the question needs (multiple keyword variants, details for every \
+listed company) than to answer incompletely."""
 
 TOOLS = [
     {
@@ -389,9 +390,9 @@ def answer_question(
             tool_calls_used += 1
             if tool_calls_used > MAX_TOOL_CALLS:
                 result = (
-                    "Tool call budget exhausted (10 calls per question). "
-                    "Answer now with the information gathered so far, and say "
-                    "explicitly which parts could not be verified."
+                    f"Tool call budget exhausted ({MAX_TOOL_CALLS} calls per "
+                    "question). Answer now with the information gathered so "
+                    "far, and say explicitly which parts could not be verified."
                 )
             else:
                 if on_tool is not None:
