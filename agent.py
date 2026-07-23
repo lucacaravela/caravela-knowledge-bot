@@ -239,6 +239,26 @@ def _create_with_retry(client: anthropic.Anthropic, **kwargs):
     raise last_exc  # type: ignore[misc]
 
 
+def _move_cache_marker(api_messages: list) -> None:
+    """Keep a single prompt-cache breakpoint on the newest dict-based block.
+
+    Each loop iteration resends the whole conversation; marking the latest
+    tool_result block caches everything before it, so re-reads cost ~10% of
+    normal input tokens. Older markers are removed (max 4 allowed per call).
+    """
+    last_block = None
+    for msg in api_messages:
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict):
+                block.pop("cache_control", None)
+                last_block = block
+    if last_block is not None:
+        last_block["cache_control"] = {"type": "ephemeral"}
+
+
 def answer_question(
     client: anthropic.Anthropic,
     api_messages: list,
@@ -261,11 +281,19 @@ def answer_question(
     tool_calls_used = 0
 
     while True:
+        _move_cache_marker(api_messages)
         response = _create_with_retry(
             client,
             model=MODEL,
             max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            # cache_control here caches the tools + system prompt prefix too.
+            system=[
+                {
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             tools=TOOLS,
             messages=api_messages,
         )

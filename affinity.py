@@ -42,6 +42,8 @@ OWNERS_FIELD_ID = "field-278854"
 MAX_SEARCH_RESULTS = 20
 MAX_NOTE_CHARS = 2_000
 MAX_TOTAL_NOTE_CHARS = 15_000
+MAX_FIELD_CHARS = 600
+MAX_DETAILS_CHARS = 12_000
 
 # Pipeline scan settings: pages of 100, newest entries first.
 PIPELINE_PAGE_SIZE = 100
@@ -376,17 +378,26 @@ def get_org_details(org_id: int) -> str:
     try:
         company = _v2_get(
             f"/companies/{org_id}",
-            params={"fieldTypes": ["global", "enriched"]},
+            params={"fieldTypes": ["global", "enriched", "relationship-intelligence"]},
         )
         name = company.get("name") or f"Company {org_id}"
         domain = company.get("domain") or ", ".join(company.get("domains") or [])
         lines = [f"{name} (id: {org_id}, domain: {domain or '-'})"]
 
+        seen: set = set()
+
+        def add_field_lines(fields: dict, indent: str = "  ") -> None:
+            for fname, fval in fields.items():
+                key = (fname, fval)
+                if key in seen:
+                    continue
+                seen.add(key)
+                lines.append(f"{indent}- {fname}: {fval[:MAX_FIELD_CHARS]}")
+
         fields = _field_map(company.get("fields"))
         if fields:
-            lines.append("Fields:")
-            for fname, fval in fields.items():
-                lines.append(f"  - {fname}: {fval[:300]}")
+            lines.append("Fields (all filled-in columns):")
+            add_field_lines(fields)
         else:
             lines.append("Fields: none filled in")
 
@@ -399,18 +410,15 @@ def get_org_details(org_id: int) -> str:
                     or f"list {entry.get('listId', '?')}"
                 )
                 added = (entry.get("createdAt") or "")[:10]
-                entry_fields = _field_map(entry.get("fields"))
-                interesting = "; ".join(
-                    f"{k}: {v[:120]}"
-                    for k, v in entry_fields.items()
-                    if k.lower() in ("status", "setor", "sector", "owners", "owner 2", "país", "priority", "motivo lost")
-                )
-                suffix = f" — {interesting}" if interesting else ""
-                lines.append(f"  - {list_name} (added {added or '?'}){suffix}")
+                lines.append(f"  - {list_name} (added {added or '?'}):")
+                add_field_lines(_field_map(entry.get("fields")), indent="      ")
         else:
             lines.append("Lists: not on any list (or list data unavailable)")
 
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        if len(result) > MAX_DETAILS_CHARS:
+            result = result[:MAX_DETAILS_CHARS] + "\n[details truncated]"
+        return result
     except requests.HTTPError as e:
         return f"Affinity API error fetching details for org {org_id}: {e}"
     except Exception as e:

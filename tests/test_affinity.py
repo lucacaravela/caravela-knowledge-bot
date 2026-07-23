@@ -233,6 +233,8 @@ def test_get_org_details_includes_fields_and_lists():
                     "fields": [
                         {"name": "Status", "value": {"data": {"text": "First Meeting"}}},
                         {"name": "Setor", "value": {"data": {"text": "Logística"}}},
+                        {"name": "Motivo lost", "value": {"data": {"text": "Round já fechado"}}},
+                        {"name": "Blurb", "value": {"data": "Freight marketplace"}},
                     ],
                 }
             ]
@@ -246,6 +248,9 @@ def test_get_org_details_includes_fields_and_lists():
     assert "Pipeline (added 2026-05-01)" in result
     assert "Status: First Meeting" in result
     assert "Setor: Logística" in result
+    # Every non-empty list column is included, deduplicated.
+    assert "Motivo lost: Round já fechado" in result
+    assert result.count("Freight marketplace") == 1
 
 
 @responses.activate
