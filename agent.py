@@ -412,6 +412,38 @@ def answer_question(
         api_messages.append({"role": "user", "content": tool_results})
 
 
+def compact_history(api_messages: list) -> list:
+    """Strip tool_use/tool_result blocks from a finished conversation.
+
+    Keeps each user question and each assistant text answer, dropping the
+    raw tool traffic in between. Applied after a question completes so the
+    NEXT question does not pay input tokens to re-read old tool dumps.
+    Consecutive same-role messages are merged to keep the API happy.
+    """
+    compacted: list = []
+    for msg in api_messages:
+        role = msg["role"] if isinstance(msg, dict) else getattr(msg, "role", "user")
+        content = msg["content"] if isinstance(msg, dict) else getattr(msg, "content", "")
+        if isinstance(content, str):
+            text = content
+        else:
+            texts = []
+            for block in content:
+                btype = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+                if btype == "text":
+                    texts.append(
+                        block.get("text") if isinstance(block, dict) else block.text
+                    )
+            text = "\n".join(t for t in texts if t)
+        if not text:
+            continue
+        if compacted and compacted[-1]["role"] == role:
+            compacted[-1]["content"] += "\n\n" + text
+        else:
+            compacted.append({"role": role, "content": text})
+    return compacted
+
+
 def format_tool_call(name: str, tool_input: dict) -> str:
     """Human-friendly one-liner describing a tool call, for the status UI."""
     args = ", ".join(f"{k}={json.dumps(v, ensure_ascii=False)}" for k, v in tool_input.items())

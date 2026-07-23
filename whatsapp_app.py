@@ -176,6 +176,7 @@ def handle_question(
         history = _get_history(phone)
         history.append({"role": "user", "content": question})
         answer = agent.answer_question(_anthropic_client, history)
+        history[:] = agent.compact_history(history)
         _trim_history(history)
     except Exception as e:
         cause = getattr(e, "__cause__", None)

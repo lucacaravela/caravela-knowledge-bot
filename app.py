@@ -140,6 +140,11 @@ def run_turn(client: anthropic.Anthropic, question: str) -> None:
                     client, st.session_state.api_messages, on_tool=on_tool
                 )
                 status.update(label="Pronto ✅", state="complete", expanded=False)
+            # Drop raw tool traffic so the next question doesn't pay to
+            # re-read it; the final answers carry the substance.
+            st.session_state.api_messages = agent.compact_history(
+                st.session_state.api_messages
+            )
             st.markdown(escape_dollars(answer))
             st.session_state.display_messages.append(("assistant", answer))
         except anthropic.AuthenticationError:
