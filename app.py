@@ -7,6 +7,7 @@ agentic loop that queries Affinity CRM and Google Drive live.
 from __future__ import annotations
 
 import os
+import re
 
 from dotenv import load_dotenv
 
@@ -80,6 +81,29 @@ def escape_dollars(text: str) -> str:
     return text.replace("$", "\\$")
 
 
+def links_in_new_tab(text: str) -> str:
+    """Turn markdown links and bare URLs into anchors that open in a new tab.
+
+    Clicking a Drive link otherwise navigates away and drops the chat
+    session (Streamlit history is per-session).
+    """
+    text = re.sub(
+        r"\[([^\]]+)\]\((https?://[^\s)]+)\)",
+        r'<a href="\2" target="_blank">\1</a>',
+        text,
+    )
+    text = re.sub(
+        r'(?<![("\'>=\]])(https?://[^\s<>)\]]+)',
+        r'<a href="\1" target="_blank">\1</a>',
+        text,
+    )
+    return text
+
+
+def render_answer(text: str) -> None:
+    st.markdown(links_in_new_tab(escape_dollars(text)), unsafe_allow_html=True)
+
+
 def init_state() -> None:
     if "api_messages" not in st.session_state:
         # Full Messages-API history (incl. tool_use / tool_result blocks).
@@ -145,7 +169,7 @@ def run_turn(client: anthropic.Anthropic, question: str) -> None:
             st.session_state.api_messages = agent.compact_history(
                 st.session_state.api_messages
             )
-            st.markdown(escape_dollars(answer))
+            render_answer(answer)
             st.session_state.display_messages.append(("assistant", answer))
         except anthropic.AuthenticationError:
             st.error("Chave da API da Anthropic inválida. Verifique ANTHROPIC_API_KEY.")
@@ -178,7 +202,10 @@ def main() -> None:
 
     for role, text in st.session_state.display_messages:
         with st.chat_message(role):
-            st.markdown(escape_dollars(text))
+            if role == "assistant":
+                render_answer(text)
+            else:
+                st.markdown(escape_dollars(text))
 
     pending = st.session_state.pending_question
     if pending:
