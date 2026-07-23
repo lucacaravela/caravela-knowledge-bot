@@ -333,7 +333,14 @@ def list_portfolio() -> str:
             else:
                 data = _v2_get(
                     f"/lists/{PORTFOLIO_LIST_ID}/list-entries",
-                    params={"limit": PIPELINE_PAGE_SIZE},
+                    params={
+                        "limit": PIPELINE_PAGE_SIZE,
+                        "fieldIds": [
+                            DESCRICAO_FIELD_ID,
+                            BLURB_FIELD_ID,
+                            ENRICHED_DESCRIPTION_FIELD_ID,
+                        ],
+                    },
                 )
             for entry in data.get("data") or []:
                 entity = entry.get("entity") or {}
@@ -342,12 +349,19 @@ def list_portfolio() -> str:
                     f"{k}: {v[:80]}" for k, v in fields.items()
                     if k.lower() in ("status", "setor", "sector", "owners")
                 )
+                desc = (
+                    fields.get("Descrição")
+                    or fields.get("Blurb")
+                    or fields.get("Description")
+                    or ""
+                )[:200]
                 domain = entity.get("domain") or "-"
                 added = (entry.get("createdAt") or "")[:10]
                 suffix = f" — {extras}" if extras else ""
+                desc_part = f"\n  desc: {desc}" if desc else ""
                 lines.append(
                     f"- {entity.get('name', '(no name)')} (id: {entity.get('id')}, "
-                    f"domain: {domain}, added: {added}){suffix}"
+                    f"domain: {domain}, added: {added}){suffix}{desc_part}"
                 )
                 count += 1
             url = (data.get("pagination") or {}).get("nextUrl")
