@@ -30,6 +30,10 @@ services:
         sync: false
       - key: TWILIO_WHATSAPP_FROM
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
   - type: web
     name: caravela-knowledge-bot
     runtime: python
@@ -57,4 +61,8 @@ services:
       - key: AUTH_COOKIE_SECRET
         generateValue: true
       - key: AUTH_REDIRECT_URI
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
         sync: false

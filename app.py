@@ -17,6 +17,7 @@ import anthropic
 import streamlit as st
 
 import agent
+import storage
 from auth_secrets import ensure_auth_secrets, missing_auth_vars
 
 st.set_page_config(page_title="Caravela Knowledge Bot", page_icon="🧭")
@@ -113,12 +114,27 @@ def init_state() -> None:
         st.session_state.display_messages = []
     if "pending_question" not in st.session_state:
         st.session_state.pending_question = None
+    if "conversation_id" not in st.session_state:
+        # Supabase conversation id (None until the first answer is saved).
+        st.session_state.conversation_id = None
 
 
 def reset_conversation() -> None:
     st.session_state.api_messages = []
     st.session_state.display_messages = []
     st.session_state.pending_question = None
+    st.session_state.conversation_id = None
+
+
+def open_conversation(conversation_id: str, email: str) -> None:
+    """Load a saved conversation into the session."""
+    messages = storage.load_messages(conversation_id, email)
+    st.session_state.api_messages = [dict(m) for m in messages]
+    st.session_state.display_messages = [
+        (m["role"], m["content"]) for m in messages
+    ]
+    st.session_state.pending_question = None
+    st.session_state.conversation_id = conversation_id
 
 
 # ---------------------------------------------------------------------------
@@ -131,9 +147,33 @@ def render_sidebar(email: str) -> None:
         st.caption(f"Logado como **{email}**")
         if st.button("Sair", use_container_width=True):
             st.logout()
-        if st.button("🗑️ Nova conversa", use_container_width=True):
+        if st.button("✨ Nova conversa", use_container_width=True):
             reset_conversation()
             st.rerun()
+
+        if storage.enabled():
+            st.divider()
+            st.markdown("**Suas conversas**")
+            conversations = storage.list_conversations(email)
+            if not conversations:
+                st.caption("Nenhuma conversa salva ainda.")
+            for conv in conversations:
+                col_open, col_del = st.columns([5, 1])
+                is_current = conv["id"] == st.session_state.conversation_id
+                label = ("▶ " if is_current else "") + conv["title"]
+                if conv.get("channel") == "whatsapp":
+                    label = "📱 " + label
+                if col_open.button(
+                    label, key=f"conv_{conv['id']}", use_container_width=True
+                ):
+                    open_conversation(conv["id"], email)
+                    st.rerun()
+                if col_del.button("🗑️", key=f"del_{conv['id']}"):
+                    storage.delete_conversation(conv["id"], email)
+                    if is_current:
+                        reset_conversation()
+                    st.rerun()
+
         st.divider()
         st.markdown("**Exemplos de perguntas**")
         for i, q in enumerate(EXAMPLE_QUESTIONS):
@@ -146,7 +186,25 @@ def render_sidebar(email: str) -> None:
 # Chat
 # ---------------------------------------------------------------------------
 
-def run_turn(client: anthropic.Anthropic, question: str) -> None:
+def save_turn(email: str, question: str, answer: str) -> None:
+    """Persist a finished question/answer pair (no-op if storage is off)."""
+    if not storage.enabled():
+        return
+    if st.session_state.conversation_id is None:
+        st.session_state.conversation_id = storage.create_conversation(
+            email, title=question, channel="web"
+        )
+    if st.session_state.conversation_id:
+        storage.append_messages(
+            st.session_state.conversation_id,
+            [
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": answer},
+            ],
+        )
+
+
+def run_turn(client: anthropic.Anthropic, email: str, question: str) -> None:
     st.session_state.display_messages.append(("user", question))
     st.session_state.api_messages.append({"role": "user", "content": question})
 
@@ -171,6 +229,7 @@ def run_turn(client: anthropic.Anthropic, question: str) -> None:
             )
             render_answer(answer)
             st.session_state.display_messages.append(("assistant", answer))
+            save_turn(email, question, answer)
         except anthropic.AuthenticationError:
             st.error("Chave da API da Anthropic inválida. Verifique ANTHROPIC_API_KEY.")
         except (anthropic.RateLimitError, anthropic.APIStatusError, anthropic.APIConnectionError):
@@ -210,11 +269,11 @@ def main() -> None:
     pending = st.session_state.pending_question
     if pending:
         st.session_state.pending_question = None
-        run_turn(client, pending)
+        run_turn(client, email, pending)
 
     question = st.chat_input("Ex.: quais empresas de fintech já vimos este ano?")
     if question:
-        run_turn(client, question)
+        run_turn(client, email, question)
 
 
 if __name__ == "__main__":

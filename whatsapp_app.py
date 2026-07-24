@@ -16,6 +16,7 @@ import os
 import re
 import threading
 import time
+from datetime import timedelta
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -27,6 +28,7 @@ import requests
 from fastapi import BackgroundTasks, FastAPI, Query, Request, Response
 
 import agent
+import storage
 
 GRAPH_API = "https://graph.facebook.com/v21.0"
 
@@ -170,14 +172,42 @@ def handle_question(
     global _anthropic_client
     send = sender or send_whatsapp_message
     send(phone, ACK_TEXT)
+
+    # Persistent history when the phone is mapped to a team member and
+    # Supabase is configured; otherwise the in-memory fallback.
+    digits = re.sub(r"\D", "", phone)
+    user_email = storage.get_email_for_phone(digits) if storage.enabled() else None
+    conversation_id = None
+
     try:
         if _anthropic_client is None:
             _anthropic_client = anthropic.Anthropic()
-        history = _get_history(phone)
+        if user_email:
+            conv = storage.latest_conversation(
+                user_email, "whatsapp", max_age=timedelta(seconds=HISTORY_TTL)
+            )
+            conversation_id = conv["id"] if conv else storage.create_conversation(
+                user_email, title=question, channel="whatsapp"
+            )
+            history = (
+                storage.load_messages(conversation_id, user_email)
+                if conversation_id
+                else []
+            )
+        else:
+            history = _get_history(phone)
         history.append({"role": "user", "content": question})
         answer = agent.answer_question(_anthropic_client, history)
         history[:] = agent.compact_history(history)
         _trim_history(history)
+        if user_email and conversation_id:
+            storage.append_messages(
+                conversation_id,
+                [
+                    {"role": "user", "content": question},
+                    {"role": "assistant", "content": answer},
+                ],
+            )
     except Exception as e:
         cause = getattr(e, "__cause__", None)
         print(
