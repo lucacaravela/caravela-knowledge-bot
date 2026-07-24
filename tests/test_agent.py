@@ -57,6 +57,22 @@ def test_make_conversation_title_strips_quotes():
     assert agent.make_conversation_title(client, "qual a receita da celes?") == "Receita da Celes"
 
 
+def test_make_conversation_title_rejects_sentence_like_answers():
+    class ChattyMessages:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                content=[
+                    SimpleNamespace(
+                        type="text",
+                        text="I don't have any information about conversations you've had before this one.",
+                    )
+                ]
+            )
+
+    client = SimpleNamespace(messages=ChattyMessages())
+    assert agent.make_conversation_title(client, "o que falamos antes?") is None
+
+
 def test_make_conversation_title_returns_none_on_failure():
     class BrokenMessages:
         def create(self, **kwargs):

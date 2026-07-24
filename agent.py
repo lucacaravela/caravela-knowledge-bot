@@ -421,10 +421,14 @@ def answer_question(
 TITLE_MODEL = os.environ.get("TITLE_MODEL", "claude-haiku-4-5-20251001")
 
 TITLE_SYSTEM_PROMPT = (
-    "Gere um título curto (3 a 6 palavras) que resuma o assunto da pergunta "
-    "do usuário, no idioma da pergunta. Responda APENAS o título — sem "
-    "aspas, sem pontuação final, sem explicação."
+    "Você é um gerador de títulos. O usuário fornece o texto de uma "
+    "pergunta; você NÃO deve respondê-la nem comentá-la — apenas rotulá-la. "
+    "Produza um título de 3 a 6 palavras resumindo o ASSUNTO da pergunta, "
+    "no idioma dela. Responda somente o título: sem aspas, sem pontuação "
+    "final, sem explicação."
 )
+
+MAX_TITLE_WORDS = 8
 
 
 def make_conversation_title(
@@ -432,21 +436,38 @@ def make_conversation_title(
 ) -> Optional[str]:
     """Generate a short conversation title with Haiku (~$0.0002 per call).
 
-    Returns None on any failure so callers can fall back to the truncated
-    question.
+    Returns None on any failure or suspicious output (e.g. the model
+    answering the question instead of titling it), so callers fall back to
+    the truncated question.
     """
     try:
         response = client.messages.create(
             model=TITLE_MODEL,
             max_tokens=30,
             system=TITLE_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": question[:500]}],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Texto da pergunta a rotular:\n"
+                        f"«{question[:400]}»\n\nTítulo:"
+                    ),
+                }
+            ],
         )
         title = "".join(
             block.text for block in response.content if block.type == "text"
         )
-        title = title.strip().strip('"').strip()
-        return title or None
+        title = title.strip().strip('"').strip("«»").strip()
+        # Reject sentence-like output (the model answered instead of titling).
+        if (
+            not title
+            or "\n" in title
+            or len(title.split()) > MAX_TITLE_WORDS
+            or len(title) > 70
+        ):
+            return None
+        return title
     except Exception:
         return None
 
