@@ -22,46 +22,21 @@ from auth_secrets import ensure_auth_secrets, missing_auth_vars
 
 st.set_page_config(page_title="Caravela Knowledge Bot", page_icon="⛵")
 
-# ChatGPT-style cleanup: ghost sidebar buttons, subtle borders, no chrome.
+# Structural tweaks only — Streamlit's native button styling (and its
+# automatic light/dark adaptation) is kept intact.
 _CSS = """
 <style>
 #MainMenu, footer {visibility: hidden;}
 header[data-testid="stHeader"] {background: transparent;}
-
 section[data-testid="stSidebar"] .stButton > button {
-    background: transparent;
-    border: none;
+    justify-content: flex-start;
     width: 100%;
-    display: block;
-    text-align: left;
-    padding: 0.35rem 0.6rem;
-    border-radius: 8px;
-    font-weight: 400;
-    color: inherit;
+}
+section[data-testid="stSidebar"] .stButton > button p {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-section[data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: inherit;
-    border: none;
-}
-section[data-testid="stSidebar"] .stButton > button:focus:not(:active) {
-    color: inherit;
-    border: none;
-    box-shadow: none;
-}
-section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
-    background: transparent;
-    border: 1px solid rgba(0, 0, 0, 0.2);
-    color: inherit;
-    font-weight: 500;
-    text-align: center;
-}
-section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
-    background: rgba(0, 0, 0, 0.06);
-    border: 1px solid rgba(0, 0, 0, 0.35);
+    max-width: 100%;
 }
 section[data-testid="stSidebar"] hr {margin: 0.6rem 0;}
 </style>
@@ -225,13 +200,16 @@ def render_sidebar(email: str) -> None:
 # Chat
 # ---------------------------------------------------------------------------
 
-def save_turn(email: str, question: str, answer: str) -> None:
+def save_turn(
+    client: anthropic.Anthropic, email: str, question: str, answer: str
+) -> None:
     """Persist a finished question/answer pair (no-op if storage is off)."""
     if not storage.enabled():
         return
     if st.session_state.conversation_id is None:
+        title = agent.make_conversation_title(client, question) or question
         st.session_state.conversation_id = storage.create_conversation(
-            email, title=question, channel="web"
+            email, title=title, channel="web"
         )
     if st.session_state.conversation_id:
         storage.append_messages(
@@ -268,7 +246,7 @@ def run_turn(client: anthropic.Anthropic, email: str, question: str) -> None:
             )
             render_answer(answer)
             st.session_state.display_messages.append(("assistant", answer))
-            save_turn(email, question, answer)
+            save_turn(client, email, question, answer)
         except anthropic.AuthenticationError:
             st.error("Chave da API da Anthropic inválida. Verifique ANTHROPIC_API_KEY.")
         except (anthropic.RateLimitError, anthropic.APIStatusError, anthropic.APIConnectionError):

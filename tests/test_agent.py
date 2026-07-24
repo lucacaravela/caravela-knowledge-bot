@@ -45,6 +45,27 @@ def test_compact_history_drops_tool_traffic_and_merges():
     assert all("big dump" not in m["content"] for m in compacted)
 
 
+def test_make_conversation_title_strips_quotes():
+    class FakeMessages:
+        def create(self, **kwargs):
+            assert kwargs["model"] == agent.TITLE_MODEL
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text='"Receita da Celes"\n')]
+            )
+
+    client = SimpleNamespace(messages=FakeMessages())
+    assert agent.make_conversation_title(client, "qual a receita da celes?") == "Receita da Celes"
+
+
+def test_make_conversation_title_returns_none_on_failure():
+    class BrokenMessages:
+        def create(self, **kwargs):
+            raise RuntimeError("api down")
+
+    client = SimpleNamespace(messages=BrokenMessages())
+    assert agent.make_conversation_title(client, "oi") is None
+
+
 def test_compact_history_alternates_roles():
     messages = [
         {"role": "user", "content": "oi"},

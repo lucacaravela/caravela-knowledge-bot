@@ -186,9 +186,16 @@ def handle_question(
             conv = storage.latest_conversation(
                 user_email, "whatsapp", max_age=timedelta(seconds=HISTORY_TTL)
             )
-            conversation_id = conv["id"] if conv else storage.create_conversation(
-                user_email, title=question, channel="whatsapp"
-            )
+            if conv:
+                conversation_id = conv["id"]
+            else:
+                title = (
+                    agent.make_conversation_title(_anthropic_client, question)
+                    or question
+                )
+                conversation_id = storage.create_conversation(
+                    user_email, title=title, channel="whatsapp"
+                )
             history = (
                 storage.load_messages(conversation_id, user_email)
                 if conversation_id

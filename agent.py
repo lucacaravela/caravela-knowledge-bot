@@ -418,6 +418,39 @@ def answer_question(
         api_messages.append({"role": "user", "content": tool_results})
 
 
+TITLE_MODEL = os.environ.get("TITLE_MODEL", "claude-haiku-4-5-20251001")
+
+TITLE_SYSTEM_PROMPT = (
+    "Gere um título curto (3 a 6 palavras) que resuma o assunto da pergunta "
+    "do usuário, no idioma da pergunta. Responda APENAS o título — sem "
+    "aspas, sem pontuação final, sem explicação."
+)
+
+
+def make_conversation_title(
+    client: anthropic.Anthropic, question: str
+) -> Optional[str]:
+    """Generate a short conversation title with Haiku (~$0.0002 per call).
+
+    Returns None on any failure so callers can fall back to the truncated
+    question.
+    """
+    try:
+        response = client.messages.create(
+            model=TITLE_MODEL,
+            max_tokens=30,
+            system=TITLE_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": question[:500]}],
+        )
+        title = "".join(
+            block.text for block in response.content if block.type == "text"
+        )
+        title = title.strip().strip('"').strip()
+        return title or None
+    except Exception:
+        return None
+
+
 def compact_history(api_messages: list) -> list:
     """Strip tool_use/tool_result blocks from a finished conversation.
 
