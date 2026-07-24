@@ -22,14 +22,6 @@ from auth_secrets import ensure_auth_secrets, missing_auth_vars
 
 st.set_page_config(page_title="Caravela Knowledge Bot", page_icon="🧭")
 
-EXAMPLE_QUESTIONS = [
-    "Quais empresas de healthcare SaaS já vimos, o que elas fazem e o que "
-    "devo ter em mente ao falar com empresas parecidas?",
-    "What fintech companies in our pipeline are in due diligence right now?",
-    "Resuma as últimas notas de reunião sobre empresas de logística.",
-]
-
-
 # ---------------------------------------------------------------------------
 # Authentication
 # ---------------------------------------------------------------------------
@@ -157,29 +149,28 @@ def render_sidebar(email: str) -> None:
             conversations = storage.list_conversations(email)
             if not conversations:
                 st.caption("Nenhuma conversa salva ainda.")
-            for conv in conversations:
-                col_open, col_del = st.columns([5, 1])
-                is_current = conv["id"] == st.session_state.conversation_id
-                label = ("▶ " if is_current else "") + conv["title"]
-                if conv.get("channel") == "whatsapp":
-                    label = "📱 " + label
-                if col_open.button(
-                    label, key=f"conv_{conv['id']}", use_container_width=True
-                ):
-                    open_conversation(conv["id"], email)
-                    st.rerun()
-                if col_del.button("🗑️", key=f"del_{conv['id']}"):
-                    storage.delete_conversation(conv["id"], email)
-                    if is_current:
-                        reset_conversation()
-                    st.rerun()
-
-        st.divider()
-        st.markdown("**Exemplos de perguntas**")
-        for i, q in enumerate(EXAMPLE_QUESTIONS):
-            if st.button(q, key=f"example_{i}", use_container_width=True):
-                st.session_state.pending_question = q
-                st.rerun()
+            # Long lists scroll inside a fixed-height box instead of
+            # stretching the sidebar forever.
+            list_box = (
+                st.container(height=380) if len(conversations) > 7 else st.container()
+            )
+            with list_box:
+                for conv in conversations:
+                    col_open, col_del = st.columns([5, 1])
+                    is_current = conv["id"] == st.session_state.conversation_id
+                    label = ("▶ " if is_current else "") + conv["title"]
+                    if conv.get("channel") == "whatsapp":
+                        label = "📱 " + label
+                    if col_open.button(
+                        label, key=f"conv_{conv['id']}", use_container_width=True
+                    ):
+                        open_conversation(conv["id"], email)
+                        st.rerun()
+                    if col_del.button("🗑️", key=f"del_{conv['id']}"):
+                        storage.delete_conversation(conv["id"], email)
+                        if is_current:
+                            reset_conversation()
+                        st.rerun()
 
 
 # ---------------------------------------------------------------------------
