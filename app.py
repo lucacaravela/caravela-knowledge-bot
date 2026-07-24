@@ -40,6 +40,23 @@ section[data-testid="stSidebar"] .stButton > button p {
     max-width: 100%;
 }
 section[data-testid="stSidebar"] hr {margin: 0.6rem 0;}
+
+.stButton > button[kind="primary"] {
+    background-color: #1f4e79;
+    border-color: #1f4e79;
+    color: #ffffff;
+}
+.stButton > button[kind="primary"]:hover {
+    background-color: #2a5f8f;
+    border-color: #2a5f8f;
+    color: #ffffff;
+}
+.stButton > button[kind="primary"]:active,
+.stButton > button[kind="primary"]:focus:not(:active) {
+    background-color: #1f4e79;
+    border-color: #1f4e79;
+    color: #ffffff;
+}
 </style>
 """
 st.markdown(_CSS, unsafe_allow_html=True)
