@@ -22,11 +22,12 @@ from auth_secrets import ensure_auth_secrets, missing_auth_vars
 
 st.set_page_config(page_title="Caravela Knowledge Bot", page_icon="⛵")
 
-# Structural tweaks only — Streamlit's native button styling (and its
-# automatic light/dark adaptation) is kept intact.
+# Structural tweaks only — Streamlit's native button styling is kept, and
+# the top-right menu stays visible so users can switch light/dark theme
+# (menu > Settings > Choose app theme).
 _CSS = """
 <style>
-#MainMenu, footer {visibility: hidden;}
+footer {visibility: hidden;}
 header[data-testid="stHeader"] {background: transparent;}
 section[data-testid="stSidebar"] .stButton > button {
     justify-content: flex-start;
@@ -58,7 +59,7 @@ def require_login() -> str:
         st.stop()
 
     if not st.user.is_logged_in:
-        st.markdown("## ⛵ Caravela Knowledge Bot")
+        st.markdown("## Caravela Knowledge Bot")
         st.write("Faça login com sua conta Google da Caravela para continuar.")
         if st.button("Entrar com Google", type="primary"):
             st.login()
@@ -73,7 +74,7 @@ def require_login() -> str:
     }
     domain_ok = bool(allowed_domain) and email.endswith("@" + allowed_domain)
     if not (domain_ok or email in allowed_emails):
-        st.markdown("## ⛵ Caravela Knowledge Bot")
+        st.markdown("## Caravela Knowledge Bot")
         st.error(
             f"Acesso negado 😕 — a conta **{email or 'desconhecida'}** não "
             f"está autorizada. Faça login com sua conta "
@@ -156,7 +157,7 @@ def open_conversation(conversation_id: str, email: str) -> None:
 
 def render_sidebar(email: str) -> None:
     with st.sidebar:
-        st.markdown("### ⛵ Caravela")
+        st.markdown("### Caravela")
         st.caption(email)
         if st.button("Nova conversa", type="primary", use_container_width=True):
             reset_conversation()
@@ -228,7 +229,7 @@ def run_turn(client: anthropic.Anthropic, email: str, question: str) -> None:
     with st.chat_message("user"):
         st.markdown(question)
 
-    with st.chat_message("assistant", avatar="⛵"):
+    with st.chat_message("assistant"):
         try:
             with st.status("Consultando Affinity e Google Drive...", expanded=True) as status:
 
@@ -264,7 +265,7 @@ def main() -> None:
     init_state()
     render_sidebar(email)
 
-    st.markdown("## ⛵ Caravela Knowledge Bot")
+    st.markdown("## Caravela Knowledge Bot")
     st.caption(
         "Pergunte sobre empresas, setores e documentos internos. As respostas "
         "vêm do Affinity e do Google Drive em tempo real."
@@ -277,8 +278,7 @@ def main() -> None:
     client = anthropic.Anthropic()
 
     for role, text in st.session_state.display_messages:
-        avatar = "⛵" if role == "assistant" else None
-        with st.chat_message(role, avatar=avatar):
+        with st.chat_message(role):
             if role == "assistant":
                 render_answer(text)
             else:
