@@ -20,7 +20,53 @@ import agent
 import storage
 from auth_secrets import ensure_auth_secrets, missing_auth_vars
 
-st.set_page_config(page_title="Caravela Knowledge Bot", page_icon="🧭")
+st.set_page_config(page_title="Caravela Knowledge Bot", page_icon="⛵")
+
+# ChatGPT-style cleanup: ghost sidebar buttons, subtle borders, no chrome.
+_CSS = """
+<style>
+#MainMenu, footer {visibility: hidden;}
+header[data-testid="stHeader"] {background: transparent;}
+
+section[data-testid="stSidebar"] .stButton > button {
+    background: transparent;
+    border: none;
+    width: 100%;
+    display: block;
+    text-align: left;
+    padding: 0.35rem 0.6rem;
+    border-radius: 8px;
+    font-weight: 400;
+    color: inherit;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: inherit;
+    border: none;
+}
+section[data-testid="stSidebar"] .stButton > button:focus:not(:active) {
+    color: inherit;
+    border: none;
+    box-shadow: none;
+}
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: transparent;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    color: inherit;
+    font-weight: 500;
+    text-align: center;
+}
+section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+    background: rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.35);
+}
+section[data-testid="stSidebar"] hr {margin: 0.6rem 0;}
+</style>
+"""
+st.markdown(_CSS, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Authentication
@@ -37,7 +83,7 @@ def require_login() -> str:
         st.stop()
 
     if not st.user.is_logged_in:
-        st.title("🧭 Caravela Knowledge Bot")
+        st.markdown("## ⛵ Caravela Knowledge Bot")
         st.write("Faça login com sua conta Google da Caravela para continuar.")
         if st.button("Entrar com Google", type="primary"):
             st.login()
@@ -52,7 +98,7 @@ def require_login() -> str:
     }
     domain_ok = bool(allowed_domain) and email.endswith("@" + allowed_domain)
     if not (domain_ok or email in allowed_emails):
-        st.title("🧭 Caravela Knowledge Bot")
+        st.markdown("## ⛵ Caravela Knowledge Bot")
         st.error(
             f"Acesso negado 😕 — a conta **{email or 'desconhecida'}** não "
             f"está autorizada. Faça login com sua conta "
@@ -135,11 +181,9 @@ def open_conversation(conversation_id: str, email: str) -> None:
 
 def render_sidebar(email: str) -> None:
     with st.sidebar:
-        st.markdown("### 🧭 Caravela Knowledge Bot")
-        st.caption(f"Logado como **{email}**")
-        if st.button("Sair", use_container_width=True):
-            st.logout()
-        if st.button("✨ Nova conversa", use_container_width=True):
+        st.markdown("### ⛵ Caravela")
+        st.caption(email)
+        if st.button("Nova conversa", type="primary", use_container_width=True):
             reset_conversation()
             st.rerun()
 
@@ -172,6 +216,10 @@ def render_sidebar(email: str) -> None:
                             reset_conversation()
                         st.rerun()
 
+        st.divider()
+        if st.button("Sair", use_container_width=True):
+            st.logout()
+
 
 # ---------------------------------------------------------------------------
 # Chat
@@ -202,7 +250,7 @@ def run_turn(client: anthropic.Anthropic, email: str, question: str) -> None:
     with st.chat_message("user"):
         st.markdown(question)
 
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar="⛵"):
         try:
             with st.status("Consultando Affinity e Google Drive...", expanded=True) as status:
 
@@ -238,7 +286,7 @@ def main() -> None:
     init_state()
     render_sidebar(email)
 
-    st.title("🧭 Caravela Knowledge Bot")
+    st.markdown("## ⛵ Caravela Knowledge Bot")
     st.caption(
         "Pergunte sobre empresas, setores e documentos internos. As respostas "
         "vêm do Affinity e do Google Drive em tempo real."
@@ -251,7 +299,8 @@ def main() -> None:
     client = anthropic.Anthropic()
 
     for role, text in st.session_state.display_messages:
-        with st.chat_message(role):
+        avatar = "⛵" if role == "assistant" else None
+        with st.chat_message(role, avatar=avatar):
             if role == "assistant":
                 render_answer(text)
             else:
