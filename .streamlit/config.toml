@@ -2,5 +2,8 @@
 base = "light"
 primaryColor = "#1f4e79"
 
+[client]
+toolbarMode = "viewer"
+
 [browser]
 gatherUsageStats = false
