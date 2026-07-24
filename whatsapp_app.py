@@ -204,6 +204,7 @@ def handle_question(
         else:
             history = _get_history(phone)
         history.append({"role": "user", "content": question})
+        history[:] = agent.trim_history(history)
         answer = agent.answer_question(_anthropic_client, history)
         history[:] = agent.compact_history(history)
         _trim_history(history)

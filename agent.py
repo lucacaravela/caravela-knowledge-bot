@@ -472,6 +472,26 @@ def make_conversation_title(
         return None
 
 
+MAX_HISTORY_MESSAGES = 40
+
+
+def trim_history(messages: list, max_messages: int = MAX_HISTORY_MESSAGES) -> list:
+    """Keep only the most recent messages, starting on a user turn.
+
+    Long-running conversations (WhatsApp threads that never expire, resumed
+    web chats) would otherwise send an ever-growing context on every
+    question.
+    """
+    trimmed = list(messages[-max_messages:])
+    while trimmed:
+        first = trimmed[0]
+        role = first.get("role") if isinstance(first, dict) else getattr(first, "role", "")
+        if role == "user":
+            break
+        trimmed.pop(0)
+    return trimmed
+
+
 def compact_history(api_messages: list) -> list:
     """Strip tool_use/tool_result blocks from a finished conversation.
 

@@ -242,6 +242,7 @@ def save_turn(
 def run_turn(client: anthropic.Anthropic, email: str, question: str) -> None:
     st.session_state.display_messages.append(("user", question))
     st.session_state.api_messages.append({"role": "user", "content": question})
+    st.session_state.api_messages = agent.trim_history(st.session_state.api_messages)
 
     with st.chat_message("user"):
         st.markdown(question)

@@ -82,6 +82,28 @@ def test_make_conversation_title_returns_none_on_failure():
     assert agent.make_conversation_title(client, "oi") is None
 
 
+def test_trim_history_caps_length_and_starts_with_user():
+    messages = []
+    for i in range(60):
+        messages.append({"role": "user", "content": f"q{i}"})
+        messages.append({"role": "assistant", "content": f"a{i}"})
+    trimmed = agent.trim_history(messages, max_messages=10)
+    assert len(trimmed) == 10
+    assert trimmed[0]["role"] == "user"
+    assert trimmed[-1]["content"] == "a59"
+
+
+def test_trim_history_drops_leading_assistant():
+    messages = [
+        {"role": "assistant", "content": "orphan"},
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "a"},
+    ]
+    trimmed = agent.trim_history(messages, max_messages=3)
+    assert trimmed[0]["role"] == "user"
+    assert len(trimmed) == 2
+
+
 def test_compact_history_alternates_roles():
     messages = [
         {"role": "user", "content": "oi"},
