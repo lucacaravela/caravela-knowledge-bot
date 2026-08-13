@@ -432,6 +432,201 @@ def search_persons(query: str) -> str:
         return f"Error searching Affinity people for '{query}': {e}"
 
 
+# ---------------------------------------------------------------------------
+# Generic list access (any Affinity list: LPs, SPVs, prospects, ...)
+# ---------------------------------------------------------------------------
+
+_all_lists_cache: dict = {"fetched_at": 0.0, "data": []}
+_list_caches: dict = {}
+MAX_BROWSE_ENTRIES = 1_500
+
+
+def _get_all_lists() -> list:
+    """All Affinity lists [{id, name, type}], cached for 15 minutes."""
+    if time.time() - _all_lists_cache["fetched_at"] > PIPELINE_CACHE_TTL:
+        data = _v2_get("/lists")
+        _all_lists_cache.update(
+            fetched_at=time.time(), data=data.get("data") or []
+        )
+    return _all_lists_cache["data"]
+
+
+def list_all_lists() -> str:
+    """Enumerate every list in Affinity (id, name, type).
+
+    Returns:
+        One line per list, or a readable error message.
+    """
+    try:
+        lists = _get_all_lists()
+        if not lists:
+            return "No lists found in Affinity."
+        lines = [f"{len(lists)} Affinity lists (id | type | name):"]
+        for l in lists:
+            lines.append(
+                f"- {l.get('id')} | {l.get('type', '?')} | {l.get('name', '(no name)')}"
+            )
+        return "\n".join(lines)
+    except requests.HTTPError as e:
+        return f"Affinity API error listing lists: {e}"
+    except Exception as e:
+        return f"Error listing Affinity lists: {e}"
+
+
+def _resolve_list(list_ref: str) -> Any:
+    """Resolve an id or (partial) name to a list dict, list of candidates, or None."""
+    lists = _get_all_lists()
+    ref = str(list_ref).strip()
+    if ref.isdigit():
+        for l in lists:
+            if str(l.get("id")) == ref:
+                return l
+        return None
+    matches = [l for l in lists if _norm(ref) in _norm(l.get("name", ""))]
+    if len(matches) == 1:
+        return matches[0]
+    exact = [l for l in matches if _norm(l.get("name", "")) == _norm(ref)]
+    if len(exact) == 1:
+        return exact[0]
+    return matches or None
+
+
+def _list_field_ids(list_id: Any) -> list:
+    """The list-scoped field ids of a list (Status, Owners, Setor, ...)."""
+    try:
+        data = _v2_get(f"/lists/{list_id}/fields")
+        return [
+            f["id"]
+            for f in (data.get("data") or [])
+            if isinstance(f, dict) and f.get("type") == "list" and f.get("id")
+        ][:12]
+    except Exception:
+        return []
+
+
+def _simplify_generic_entry(entry: dict) -> dict:
+    entity = entry.get("entity") or {}
+    name = entity.get("name") or " ".join(
+        p for p in (entity.get("firstName"), entity.get("lastName")) if p
+    ) or "(no name)"
+    return {
+        "id": entity.get("id"),
+        "name": name,
+        "domain": entity.get("domain") or "",
+        "fields": _field_map(entity.get("fields")),
+        "added": (entry.get("createdAt") or "")[:10],
+    }
+
+
+def _iter_list_entries(list_id: Any) -> Iterator[dict]:
+    """Yield simplified entries of any list, newest first, cached like Pipeline."""
+    cache = _list_caches.setdefault(
+        list_id, {"fetched_at": 0.0, "entries": [], "next_url": None, "exhausted": False}
+    )
+    if time.time() - cache["fetched_at"] > PIPELINE_CACHE_TTL:
+        cache.update(
+            fetched_at=time.time(), entries=[], next_url=None, exhausted=False
+        )
+    index = 0
+    field_ids = None
+    while True:
+        while index < len(cache["entries"]):
+            yield cache["entries"][index]
+            index += 1
+        if cache["exhausted"] or len(cache["entries"]) >= MAX_BROWSE_ENTRIES:
+            return
+        if cache["next_url"]:
+            data = _v2_get_url(cache["next_url"])
+        else:
+            if field_ids is None:
+                field_ids = _list_field_ids(list_id)
+            params: dict = {"limit": PIPELINE_PAGE_SIZE}
+            if field_ids:
+                params["fieldIds"] = field_ids
+            data = _v2_get(f"/lists/{list_id}/list-entries", params=params)
+        page = data.get("data") or []
+        cache["entries"].extend(_simplify_generic_entry(e) for e in page)
+        cache["next_url"] = (data.get("pagination") or {}).get("nextUrl")
+        if not page or not cache["next_url"]:
+            cache["exhausted"] = True
+
+
+def browse_list(list_ref: str, keyword: Optional[str] = None, limit: int = 20) -> str:
+    """Browse any Affinity list by name or id, newest entries first.
+
+    Args:
+        list_ref: List id or (partial) list name, e.g. 'Lista Master'.
+        keyword: Optional filter matched (accent/case-insensitive) against
+            entry names and all field values.
+        limit: Max entries to return (default 20, max 60).
+
+    Returns:
+        Matching entries with their field values, or a readable error.
+    """
+    try:
+        resolved = _resolve_list(list_ref)
+        if resolved is None:
+            return (
+                f"No Affinity list matches '{list_ref}'. Use list_all_lists "
+                "to see the available lists."
+            )
+        if isinstance(resolved, list):
+            options = "; ".join(
+                f"{l.get('name')} (id {l.get('id')})" for l in resolved[:10]
+            )
+            return (
+                f"Multiple lists match '{list_ref}': {options}. Call again "
+                "with the exact id."
+            )
+
+        list_id = resolved.get("id")
+        list_name = resolved.get("name", list_ref)
+        limit = max(1, min(int(limit or 20), 60))
+        matches = []
+        scanned = 0
+        for entry in _iter_list_entries(list_id):
+            scanned += 1
+            if keyword:
+                blob = _norm(
+                    entry["name"]
+                    + " "
+                    + " ".join(entry["fields"].values())
+                )
+                if _norm(keyword) not in blob:
+                    continue
+            matches.append(entry)
+            if len(matches) >= limit:
+                break
+
+        cache = _list_caches.get(list_id, {})
+        coverage = (
+            f"(scanned all {scanned} entries)"
+            if cache.get("exhausted") and scanned >= len(cache.get("entries", []))
+            else f"(scanned the {scanned} most recent entries; older ones not scanned)"
+        )
+        header = f"List '{list_name}' (id {list_id})"
+        if keyword:
+            header += f", keyword~'{keyword}'"
+        if not matches:
+            return f"{header}: no matching entries {coverage}."
+
+        lines = [f"{header}: {len(matches)} entries {coverage}:"]
+        for m in matches:
+            details = "; ".join(
+                f"{k}: {v[:100]}" for k, v in list(m["fields"].items())[:6]
+            )
+            domain = f", domain: {m['domain']}" if m["domain"] else ""
+            suffix = f" — {details}" if details else ""
+            lines.append(
+                f"- {m['name']} (id: {m['id']}{domain}, added: {m['added']}){suffix}"
+            )
+        return "\n".join(lines)
+    except requests.HTTPError as e:
+        return f"Affinity API error browsing list '{list_ref}': {e}"
+    except Exception as e:
+        return f"Error browsing Affinity list '{list_ref}': {e}"
+
+
 def _org_list_entries(org_id: Any) -> list:
     """Fetch v2 list entries (with fields) for one company. [] on failure."""
     try:

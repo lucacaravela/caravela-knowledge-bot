@@ -241,6 +241,105 @@ def test_search_orgs_http_error_returns_string():
 
 
 # ---------------------------------------------------------------------------
+# list_all_lists / browse_list
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def clear_generic_list_caches():
+    affinity._all_lists_cache.update(fetched_at=0.0, data=[])
+    affinity._list_caches.clear()
+    yield
+    affinity._all_lists_cache.update(fetched_at=0.0, data=[])
+    affinity._list_caches.clear()
+
+
+def _mock_all_lists(rsps):
+    rsps.get(
+        f"{V2}/lists",
+        json={
+            "data": [
+                {"id": 255318, "name": "Lista Master - LPs and Prospects", "type": "company"},
+                {"id": 31953, "name": "Pipeline", "type": "company"},
+                {"id": 58772, "name": "Mentores Caravela", "type": "person"},
+            ]
+        },
+    )
+
+
+@responses.activate
+def test_list_all_lists_enumerates():
+    _mock_all_lists(responses)
+    result = affinity.list_all_lists()
+    assert "Lista Master - LPs and Prospects" in result
+    assert "Mentores Caravela" in result
+
+
+@responses.activate
+def test_browse_list_by_partial_name_with_fields():
+    _mock_all_lists(responses)
+    responses.get(
+        f"{V2}/lists/255318/fields",
+        json={"data": [{"id": "field-1", "name": "Status", "type": "list"}]},
+    )
+    responses.get(
+        f"{V2}/lists/255318/list-entries",
+        json={
+            "data": [
+                {
+                    "createdAt": "2026-02-01T00:00:00Z",
+                    "entity": {
+                        "id": 7,
+                        "name": "Big LP Fund",
+                        "domain": "biglp.com",
+                        "fields": [
+                            {"name": "Status", "value": {"data": {"text": "Won"}}}
+                        ],
+                    },
+                }
+            ],
+            "pagination": {"nextUrl": None},
+        },
+    )
+    result = affinity.browse_list("lista master")
+    assert "Lista Master - LPs and Prospects" in result
+    assert "Big LP Fund" in result
+    assert "Status: Won" in result
+    assert "scanned all 1 entries" in result
+
+
+@responses.activate
+def test_browse_list_keyword_and_person_entities():
+    _mock_all_lists(responses)
+    responses.get(f"{V2}/lists/58772/fields", json={"data": []})
+    responses.get(
+        f"{V2}/lists/58772/list-entries",
+        json={
+            "data": [
+                {
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "entity": {"id": 1, "firstName": "Maria", "lastName": "Souza", "fields": []},
+                },
+                {
+                    "createdAt": "2026-01-02T00:00:00Z",
+                    "entity": {"id": 2, "firstName": "Joao", "lastName": "Lima", "fields": []},
+                },
+            ],
+            "pagination": {"nextUrl": None},
+        },
+    )
+    result = affinity.browse_list("Mentores", keyword="maria")
+    assert "Maria Souza" in result
+    assert "Joao Lima" not in result
+
+
+@responses.activate
+def test_browse_list_unknown_name():
+    _mock_all_lists(responses)
+    result = affinity.browse_list("inexistente xyz")
+    assert "No Affinity list matches" in result
+
+
+# ---------------------------------------------------------------------------
 # list_portfolio / search_persons
 # ---------------------------------------------------------------------------
 

@@ -57,6 +57,13 @@ Preliminar'/'Deep Dive'/'Termsheet' (active work) to 'Won'/'Pass'/'Lost'. \
 The 'Investidas' list holds portfolio companies — use list_portfolio for \
 questions about companies the fund invested in, and search_persons for \
 people/founder lookups.
+- The CRM has ~60 other lists beyond dealflow: LP lists ('Lista Master - \
+LPs and Prospects', 'LPs Fundo 1/2', 'Full LP's List CARAVELA'), SPV lists \
+per deal ('SPV Mottu...', 'SPV Caju...'), prospects by region ('Prospects \
+LatAm/USA/Europe/MENA/Asia'), 'CVCs Brasil', 'Funds Relationships', \
+fundraising lists ('Caravela VC III'), events and talent lists. For any \
+question about LPs, SPVs, fundraising, co-investors or prospects: find the \
+list with list_all_lists, then browse_list it (keyword filter available).
 - Pass/lost reasons live in CRM COLUMNS, not in notes: 'Motivo lost' \
 (short categories, already shown by search_pipeline) and 'Motivo Pass \
 Detalhado' (the full pass rationale/email, returned by get_org_details). \
@@ -176,6 +183,44 @@ TOOLS = [
         },
     },
     {
+        "name": "list_all_lists",
+        "description": (
+            "Enumerate ALL lists in Affinity (id, type, name): LP lists, SPV "
+            "lists, prospects by region, CVCs, funds, events, talent, etc. "
+            "Use when a question concerns something beyond dealflow/portfolio "
+            "to discover which list holds it, then browse it with browse_list."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "browse_list",
+        "description": (
+            "Browse ANY Affinity list by name or id (e.g. 'Lista Master', "
+            "'SPV Mottu', 'Prospects LatAm', 'LPs Fundo 2'), newest entries "
+            "first, with all list fields (Status, Owners, ...). Optional "
+            "keyword filters by entry name and field values. For dealflow "
+            "use search_pipeline; for portfolio use list_portfolio."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "list_ref": {
+                    "type": "string",
+                    "description": "List name (partial ok) or numeric id.",
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "Optional filter on names and field values.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max entries (default 20, max 60).",
+                },
+            },
+            "required": ["list_ref"],
+        },
+    },
+    {
         "name": "search_orgs",
         "description": (
             "Search organizations in Affinity CRM by NAME or name keyword. "
@@ -281,6 +326,8 @@ TOOLS = [
 _TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
     "search_pipeline": affinity.search_pipeline,
     "list_portfolio": affinity.list_portfolio,
+    "list_all_lists": affinity.list_all_lists,
+    "browse_list": affinity.browse_list,
     "search_persons": affinity.search_persons,
     "search_orgs": affinity.search_orgs,
     "get_org_details": affinity.get_org_details,
