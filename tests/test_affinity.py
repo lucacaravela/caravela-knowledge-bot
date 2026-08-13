@@ -333,6 +333,44 @@ def test_browse_list_keyword_and_person_entities():
 
 
 @responses.activate
+def test_browse_list_shows_linked_entities():
+    _mock_all_lists(responses)
+    responses.get(
+        f"{V2}/lists/255318/fields",
+        json={"data": [{"id": "field-1", "name": "Status", "type": "list"}, {"id": "companies", "name": "Organizations", "type": "list"}]},
+    )
+    responses.get(
+        f"{V2}/lists/255318/list-entries",
+        json={
+            "data": [
+                {
+                    "createdAt": "2026-03-01T00:00:00Z",
+                    "type": "opportunity",
+                    "entity": {
+                        "id": 50,
+                        "name": "Fabio Scopeta",
+                        "fields": [
+                            {"id": "field-1", "name": "Amount", "value": {"type": "number", "data": None}},
+                            {
+                                "id": "companies",
+                                "name": "Organizations",
+                                "value": {"type": "company-multi", "data": [{"id": 297964770, "name": "Fabio Scopeta"}]},
+                            },
+                        ],
+                    },
+                }
+            ],
+            "pagination": {"nextUrl": None},
+        },
+    )
+    result = affinity.browse_list("lista master")
+    assert "linked: Fabio Scopeta (org id 297964770)" in result
+    # Empty Amount is dropped, Organizations not duplicated in field details.
+    assert "Amount" not in result
+    assert "Organizations" not in result
+
+
+@responses.activate
 def test_browse_list_unknown_name():
     _mock_all_lists(responses)
     result = affinity.browse_list("inexistente xyz")

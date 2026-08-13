@@ -492,14 +492,15 @@ def _resolve_list(list_ref: str) -> Any:
 
 
 def _list_field_ids(list_id: Any) -> list:
-    """The list-scoped field ids of a list (Status, Owners, Setor, ...)."""
+    """The full column roster of a list (its own fields, any globals shown
+    on it, and the companies/persons relationship pseudo-fields)."""
     try:
         data = _v2_get(f"/lists/{list_id}/fields")
         return [
             f["id"]
             for f in (data.get("data") or [])
-            if isinstance(f, dict) and f.get("type") == "list" and f.get("id")
-        ][:12]
+            if isinstance(f, dict) and f.get("id")
+        ][:15]
     except Exception:
         return []
 
@@ -509,11 +510,24 @@ def _simplify_generic_entry(entry: dict) -> dict:
     name = entity.get("name") or " ".join(
         p for p in (entity.get("firstName"), entity.get("lastName")) if p
     ) or "(no name)"
+    # Linked companies/persons (opportunity lists link the real entities,
+    # whose global fields hold e.g. the $ Fundo commitment columns).
+    links = []
+    for field in entity.get("fields") or []:
+        if isinstance(field, dict) and field.get("id") in ("companies", "persons"):
+            kind = "org" if field.get("id") == "companies" else "person"
+            for d in ((field.get("value") or {}).get("data") or []):
+                if isinstance(d, dict) and d.get("id"):
+                    link_name = d.get("name") or " ".join(
+                        p for p in (d.get("firstName"), d.get("lastName")) if p
+                    )
+                    links.append(f"{link_name} ({kind} id {d.get('id')})")
     return {
         "id": entity.get("id"),
         "name": name,
         "domain": entity.get("domain") or "",
         "fields": _field_map(entity.get("fields")),
+        "links": links,
         "added": (entry.get("createdAt") or "")[:10],
     }
 
@@ -612,13 +626,21 @@ def browse_list(list_ref: str, keyword: Optional[str] = None, limit: int = 20) -
 
         lines = [f"{header}: {len(matches)} entries {coverage}:"]
         for m in matches:
+            shown_fields = {
+                k: v
+                for k, v in m["fields"].items()
+                if k not in ("Organizations", "People")
+            }
             details = "; ".join(
-                f"{k}: {v[:100]}" for k, v in list(m["fields"].items())[:6]
+                f"{k}: {v[:100]}" for k, v in list(shown_fields.items())[:8]
             )
             domain = f", domain: {m['domain']}" if m["domain"] else ""
             suffix = f" — {details}" if details else ""
+            link_part = (
+                f"\n  linked: {'; '.join(m['links'][:4])}" if m.get("links") else ""
+            )
             lines.append(
-                f"- {m['name']} (id: {m['id']}{domain}, added: {m['added']}){suffix}"
+                f"- {m['name']} (id: {m['id']}{domain}, added: {m['added']}){suffix}{link_part}"
             )
         return "\n".join(lines)
     except requests.HTTPError as e:

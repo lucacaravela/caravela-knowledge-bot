@@ -64,6 +64,18 @@ LatAm/USA/Europe/MENA/Asia'), 'CVCs Brasil', 'Funds Relationships', \
 fundraising lists ('Caravela VC III'), events and talent lists. For any \
 question about LPs, SPVs, fundraising, co-investors or prospects: find the \
 list with list_all_lists, then browse_list it (keyword filter available).
+- LP COMMITMENT AMOUNTS: on the 'LPs Fundo 1/2' lists the 'Amount' column \
+is unreliable (often empty/stale) — NEVER quote it as the commitment. The \
+real values live in the GLOBAL company fields '$ Fundo 1', '$ Fundo 2 - \
+BR', '$ Fundo 2 - OFFSHORE' (and 'Commitment FIII' on Lista Master). \
+Opportunity-list entries show their linked org/person ('linked: ... id N') \
+— call get_org_details on that linked org id to read the $ columns.
+- ENTITY DRILL-DOWN IS MANDATORY: when asked about a specific entity's \
+attribute (AUM, thesis, commitment, meetings) and the list columns don't \
+contain it, call get_org_details AND get_notes on that entity's id (taken \
+from the list entry, NOT from a fresh name search — names like 'Astor' \
+match many unrelated orgs) before saying the information is not recorded. \
+LPs and funds have notes too.
 - Pass/lost reasons live in CRM COLUMNS, not in notes: 'Motivo lost' \
 (short categories, already shown by search_pipeline) and 'Motivo Pass \
 Detalhado' (the full pass rationale/email, returned by get_org_details). \
