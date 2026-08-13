@@ -83,14 +83,19 @@ WhatsApp phones must be in `phone_mappings` (digits only, include the
 Brazilian variant WITHOUT the extra 9) for durable history; unmapped
 phones get in-memory history only.
 
-**WhatsApp status**: Twilio sandbox works today (join phrase + numbers in
-`ALLOWED_PHONES` env). Meta is BLOCKED until business verification
-approves: unverified accounts get error 130497 ("restricted from
-messaging users in this country") for ALL messages to Brazil, templates
-and replies alike. After verification: dedicated number (never used on
-WhatsApp before), permanent token via a Business Manager system user,
-swap `WHATSAPP_TOKEN`/`WHATSAPP_PHONE_NUMBER_ID`, point the webhook,
-retire Twilio. No code changes needed — both endpoints already exist.
+**WhatsApp status (updated 2026-08-13)**: PRODUCTION LIVE on the Meta
+Cloud API — business verification APPROVED, dedicated Brazilian number
+(prepaid eSIM; keep it recharged every ~2-3 months or the operator
+recycles it, and never register it on the WhatsApp app itself), webhook
+on `/webhook`. The WABA id is 2566860473759050, app id 1598215981942474,
+under the business portfolio that owns @caravelacapital. Access control:
+`ALLOWED_PHONES` env + Supabase `phone_mappings` for persistent history.
+The token in `WHATSAPP_TOKEN` must be the PERMANENT system-user token
+(Business settings > System users), never the 24h token from the API
+Setup page. Twilio sandbox (`/twilio-webhook`) remains as a dormant
+fallback. Historical note: before verification, error 130497 blocked all
+messages to Brazil — verification status is the first thing to check if
+that error ever reappears.
 
 ## Cost containment (do not undo these)
 
